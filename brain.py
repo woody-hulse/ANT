@@ -1,9 +1,17 @@
+'''
+UNUSED FILE (reference)
+See network.py for new network
+'''
+
+
 import networkx as nx
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import deque
 from tqdm import tqdm
+
+# import tensorflow as tf
 
 from utils import *
 
@@ -44,7 +52,7 @@ class Linear(Layer):
         return x
     
     def dydx(self, output):
-        return np.array([output])
+        return np.ones_like(output)
 
 
 class Neuron:
@@ -62,12 +70,46 @@ class Neuron:
         self.inputs_ = deque([])
         self.outputs_ = deque([])
 
+        self.compiled = False
+
     def initialize_weights(self):
+        np.random.seed(42)
         self.input_size = len(self.prev)
         self.output_size = len(self.next)
         self.weights = np.random.normal(size=(self.input_size, self.output_size))
         self.bias = np.zeros(self.output_size)
         self.activation = Linear()
+
+    '''
+    UNUSED - inefficient, look into this
+    '''
+    def backpropagate(self, J, output_index, depth=0, max_depth=6, alpha=0.01):
+        if depth > max_depth: return
+
+        try:
+            inputs = self.inputs[output_index]
+            outputs = self.outputs[output_index]
+        except IndexError:
+            return
+
+        dady = self.activation.dydx(outputs)
+        dydx = self.weights
+        dydw = inputs
+        dydb = 1
+
+        dldw = np.outer(J * dady, dydw)
+        dldb = J * dady * dydb
+
+        # print(J, dady, dydb)
+
+        self.weights -= alpha * dldw.T
+        self.bias -= alpha * dldb[0]
+
+        J = np.mean(J * dady * dydx, keepdims=True)
+        for prev in self.valid_prev[output_index]:
+            prev.backpropagate(J, output_index, depth=depth + 1, max_depth=max_depth, alpha=alpha)
+
+    
 
 class NeuralNetwork():
     def __init__(self, num_neurons, edge_probability, num_input_neurons=10, num_output_neurons=10):
@@ -78,8 +120,7 @@ class NeuralNetwork():
         self.initialize_network(num_neurons, edge_probability)
         self.num_edges = np.sum(self.adjacency_matrix, dtype=np.int32)
         self.initialize_neuron_graph()
-
-
+    
 
     def naive_initialize_network(self, num_neurons, edge_probability):
         adjacency_matrix = np.random.random((num_neurons, num_neurons)) < edge_probability
@@ -275,23 +316,25 @@ class NeuralNetwork():
         self.max_depth = max_depth
         print('Compiling network')
         def find_neuron_inputs(neuron, depth, output_index):
-            neuron.outputs = [np.array([]) for _ in range(len(self.output_neuron_indices))]
+            neuron.compiled = True
+            neuron.outputs = [[0 for _ in range(neuron.weights.shape[1])] for _ in range(len(self.output_neuron_indices))]
             if neuron.id in self.input_neuron_indices: return True
             if depth > max_depth: return False
 
             valid_prev = []
             for prev in neuron.prev:
-                if find_neuron_inputs(prev, depth + 1, output_index): pass
-                valid_prev.append(prev)
+                if find_neuron_inputs(prev, depth + 1, output_index):
+                    valid_prev.append(prev)
             
             neuron.valid_prev[output_index] = valid_prev
-            neuron.inputs = [np.array([]) for _ in range(len(self.output_neuron_indices))]
+            neuron.inputs = np.array([np.zeros(neuron.weights.shape[0]) for _ in range(len(self.output_neuron_indices))])
 
             if len(valid_prev) > 0: return True
             else: return False
 
         for i, output_neuron in enumerate(self.output_neurons):
             find_neuron_inputs(output_neuron, depth=0, output_index=i)
+            # print(output_neuron.outputs)
 
     
     def compiled_forward_pass(self, inputs):
@@ -304,23 +347,24 @@ class NeuralNetwork():
                 i = self.input_neuron_indices.index(neuron.id)
                 neuron_inputs = np.array([inputs[i]])
                 # print(1, inputs[i])
+            elif len(neuron.valid_prev[output_index]) == 0: return 0
 
             if neuron.id not in self.input_neuron_indices:
-                if len(neuron.valid_prev[output_index]) == 0 or len(neuron.prev) == 0: return 0
-                
                 neuron_inputs = np.array([
                     compute_neuron(prev, next=neuron, depth=depth + 1, output_index=output_index) 
-                    for prev in neuron.valid_prev[output_index]])
+                    for prev in neuron.prev])
             
                 if len(neuron_inputs.shape) == 2: neuron_inputs = neuron_inputs[:, 0]
                 neuron.inputs[output_index] = neuron_inputs
                 # print(neuron_inputs)
-
+            
             neuron_outputs = neuron_inputs @ neuron.weights + neuron.bias
 
-            neuron_outputs = neuron_outputs[neuron.next.index(next)]
+            next_index = neuron.next.index(next)
+            neuron_outputs = neuron_outputs[next_index]
             activation_outputs = neuron.activation(neuron_outputs)
-            neuron.outputs[output_index] = activation_outputs
+            neuron.outputs[output_index][next_index] = activation_outputs
+            # print(neuron.outputs, activation_outputs)
             # print(activation_outputs)
             return activation_outputs
 
@@ -332,37 +376,121 @@ class NeuralNetwork():
         return outputs
     
 
+    def compiled_backward_pass_bfs(self, loss, y, y_hat, alpha=0.01):
+
+        queue = deque([])  # Each item is (neuron, depth, J, output_index, next)
+
+        dlda = loss.dydx(y, y_hat)
+        for i, neuron in enumerate(self.output_neurons):
+            queue.append((neuron, 0, dlda[i], i, None))
+
+        while queue:
+            current, depth, J, output_index, next = queue.popleft()
+            
+            if depth > self.max_depth: continue
+            if J is None or np.sum(J) == 0: continue
+            
+            if len(current.valid_prev[output_index]) > 0 or current.id in self.input_neuron_indices:
+                try:
+                    inputs = current.inputs[output_index]
+                    outputs = current.outputs[output_index]
+                except IndexError:
+                    continue
+
+                if not next: next_index = 0
+                else: next_index = current.next.index(next)
+
+                outputs_next = outputs[next_index]
+                dady = current.activation.dydx(outputs_next)
+                dydx = current.weights[:, next_index]
+                dydw = inputs
+                dydb = 1
+
+                dldw = J * dady * dydw
+                dldb = J * dady * dydb
+
+                current.weights[:, next_index] -= alpha * np.squeeze(dldw)
+                current.bias[next_index] -= alpha * dldb
+                J_next = J * dady * dydx
+                        
+                for i, prev in enumerate(current.valid_prev[output_index]):
+                    queue.append((prev, depth + 1, J_next[i], output_index, current))
+
+
+
     def compiled_backward_pass(self, loss, y, y_hat, alpha=0.01):
-        def differentiate_neuron(neuron, J, depth, output_index):
+        def differentiate_neuron(neuron, J, depth, output_index, next):
             if not neuron or depth > self.max_depth: return
+            if np.sum(J) == 0: return
+            if len(neuron.valid_prev[output_index]) == 0 and not neuron.id in self.input_neuron_indices:
+                return
+                # print(neuron.id, self.input_neuron_indices, neuron.inputs, neuron.compiled)
 
             try:
                 inputs = neuron.inputs[output_index]
                 outputs = neuron.outputs[output_index]
             except IndexError:
                 return
+            
+            if not next: next_index = 0
+            else: next_index = neuron.next.index(next)
 
+            outputs = outputs[next_index]
+            # print(outputs)
             dady = neuron.activation.dydx(outputs)
-            dydx = neuron.weights
+            dydx = neuron.weights[:, next_index]
             dydw = inputs
             dydb = 1
 
-            dldw = np.outer(J * dady, dydw)
+            # print(J, dady, dydw)
+
+            dldw = J * dady * dydw
             dldb = J * dady * dydb
+            
+            '''
+            
+            print('J_n:', J.shape)
+            print('w:', neuron.weights.shape)
+            print('b:', neuron.bias.shape)
+            print()
+            print('dady:', dady.shape)
+            print('dydx:', dydx.shape)
+            print()
+            print('dydw:', dydw.shape)
+            print('dydb:', '(1,)')
+            print()
+            print('dldw', dldw.shape)
+            print('dldb:', dldb.shape)
+            
+            print('J_n:', J)
+            print('w:', neuron.weights)
+            print('b:', neuron.bias)
+            print()
+            print('dady:', dady)
+            print('dydx:', dydx)
+            print()
+            print('dydw:', dydw)
+            print('dydb:', '(1,)')
+            print()
+            print('dldw', dldw)
+            print('dldb:', dldb)
 
-            # print(J, dady, dydb)
+            '''
 
-            neuron.weights -= alpha * dldw.T
-            neuron.bias -= alpha * dldb[0]
+            neuron.weights[:, next_index] -= alpha * np.squeeze(dldw)
+            neuron.bias[next_index] -= alpha * dldb
 
-            J_next = np.mean(J * dady * dydx, keepdims=True)
-            for prev in neuron.valid_prev[output_index]:
-                differentiate_neuron(prev, J_next, depth=depth + 1, output_index=output_index)
+            # print(J, dady, dydx)
+            # print(J, dady, dydx)
+            J = J * dady * dydx
+           
+            # print('J_n+1', J.shape)
+            for i, prev in enumerate(neuron.valid_prev[output_index]):
+                differentiate_neuron(prev, J[i], depth=depth + 1, output_index=output_index, next=neuron)
 
         dlda = loss.dydx(y, y_hat)
         for i, output_neuron in enumerate(self.output_neurons):
-            differentiate_neuron(output_neuron, dlda, depth=0, output_index=i)
-
+            differentiate_neuron(output_neuron, dlda, depth=0, output_index=i, next=None)
 
     def forward_pass(self, inputs, max_depth=7):
         def compute_neuron(neuron, next, depth):
@@ -409,6 +537,9 @@ class NeuralNetwork():
             # print(J.shape, dady.shape, dydw.shape, dldw.shape, neuron.weights.shape)
             # print(dldb.shape, neuron.bias.shape)
 
+            if np.sum(alpha * dldw.T) != 0:
+                print('-', end='')
+
             neuron.weights -= alpha * dldw.T
             neuron.bias -= alpha * dldb[0]
 
@@ -421,6 +552,8 @@ class NeuralNetwork():
         for output_neuron in self.output_neurons:
             differentiate_neuron(output_neuron, dlda)
 
+
+raise Exception('Run `python neuron_graph.py` to create and train network')
 
 network = NeuralNetwork(
     num_neurons         = 32,
@@ -448,7 +581,7 @@ def train_compiled(X, Y, epochs=10):
             y_hat = network.compiled_forward_pass(x)
             total_loss += loss_layer(y, y_hat)
             # print('Backward Pass')
-            network.compiled_backward_pass(loss_layer, y, y_hat, alpha=5e-6)
+            network.compiled_backward_pass_bfs(loss_layer, y, y_hat, alpha=5e-6)
         print(f'Epoch {epoch + 1} | loss : {total_loss / train_size}')
 
 def train(X, Y, epochs=10, max_depth=5):
@@ -467,15 +600,16 @@ def train(X, Y, epochs=10, max_depth=5):
         print(f'Epoch {epoch + 1} | loss : {total_loss / train_size}')
 
 
-X = [[0.5488135,  0.71518937, 0.60276338, 0.54488318],
- [0.4236548,  0.64589411, 0.43758721, 0.891773  ],
- [0.96366276, 0.38344152, 0.79172504, 0.52889492],
- [0.56804456, 0.92559664, 0.07103606, 0.0871293 ],
- [0.0202184,  0.83261985, 0.77815675, 0.87001215]]
-Y = [7.66535545, 8.01574137, 8.4595805, 6.04627032, 6.64351887]
+X = [[np.random.randint(0, 10) for _ in range(4)] for _ in range(1000)]
+Y = [np.sum(x) for x in X]
 
-train_compiled(X, Y, epochs=10)
-train(X, Y, epochs=10)
+# print(X, Y)
+
+# print(network.forward_pass(X[0]))
+train_compiled(X, Y, epochs=100)
+for neuron in network.neurons: neuron.initialize_weights()
+# print(network.forward_pass(X[0]))
+# train(X, Y, epochs=10)
 
 
 '''
