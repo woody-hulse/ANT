@@ -3,17 +3,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import deque
-import time
 from tqdm import tqdm
 
-
-def time_function(func, params=[], name=''):
-    start_time = time.time()
-    func(*params)
-    end_time = time.time()
-
-    print(f'Time [{name}]:', round(end_time - start_time, 4), 's')
-
+from utils import *
 
 
 class Layer():
@@ -60,12 +52,15 @@ class Neuron:
         self.id = id
         self.next = []
         self.prev = []
+        self.valid_prev = []
 
         self.weight = np.random.normal()
         self.bias = 0
 
-        self.inputs = deque([])
-        self.outputs = deque([])
+        self.inputs = []
+        self.outputs = []
+        self.inputs_ = deque([])
+        self.outputs_ = deque([])
 
     def initialize_weights(self):
         self.input_size = len(self.prev)
@@ -151,7 +146,9 @@ class NeuralNetwork():
     def initialize_neuron_graph(self):
         neurons = []
         for i in range(self.num_neurons):
-            neurons.append(Neuron(i))
+            neuron = Neuron(i)
+            neuron.valid_prev = [[] for _ in range(len(self.output_neuron_indices))]
+            neurons.append(neuron)
 
         for i in range(self.adjacency_matrix.shape[0]):
             for j in range(self.adjacency_matrix.shape[1]):
@@ -176,7 +173,7 @@ class NeuralNetwork():
         print('Input indices         :', self.input_neuron_indices)
         print('Output indices        :', self.output_neuron_indices)
 
-    def visualize_network(self, paths=[]):
+    def visualize_network(self, paths=[], show_weight=False):
         G = nx.Graph(self.adjacency_matrix)
         G_ = G.copy()
 
@@ -198,6 +195,24 @@ class NeuralNetwork():
         for path in paths:
             path_edge_attributes = {edge: {'color': 'skyblue', 'width': 1} for edge in zip(path[:-1], path[1:])}
             edge_attributes = {**edge_attributes, **path_edge_attributes}
+
+        min_weight_color = np.array([0, 0, 0])
+        max_weight_color = np.array([0.6, 0.75, 0.9])
+        if show_weight:
+            max_weight = 1
+            for neuron in self.neurons: 
+                for weight in neuron.weights: max_weight = max(max_weight, np.abs(np.sum(weight)))
+            print(max_weight)
+
+            for i, neuron in enumerate(self.neurons):
+                for weight, next in zip(neuron.weights, neuron.next):
+                    if not next: continue
+                    next_i = self.neurons.index(next)
+                    weight_mag = np.abs(np.sum(weight)) / max_weight
+                    print(weight_mag)
+                    color_value = plt.cm.Blues(weight_mag + 0.1)
+                    edge_attributes[(i, next_i)] = {'color': min_weight_color + 0.6 * max_weight_color * weight_mag}
+
         nx.set_edge_attributes(G_, edge_attributes)
 
         nx.draw(G, pos, with_labels=False, font_weight='bold', node_size=neuron_sizes, node_color=neuron_colors, font_color='black', font_size=8, edge_color=(0.4, 0.4, 0.4), width=0.2)
@@ -256,6 +271,99 @@ class NeuralNetwork():
         return paths
     
 
+    def compile(self, max_depth=7):
+        self.max_depth = max_depth
+        print('Compiling network')
+        def find_neuron_inputs(neuron, depth, output_index):
+            neuron.outputs = [np.array([]) for _ in range(len(self.output_neuron_indices))]
+            if neuron.id in self.input_neuron_indices: return True
+            if depth > max_depth: return False
+
+            valid_prev = []
+            for prev in neuron.prev:
+                if find_neuron_inputs(prev, depth + 1, output_index): pass
+                valid_prev.append(prev)
+            
+            neuron.valid_prev[output_index] = valid_prev
+            neuron.inputs = [np.array([]) for _ in range(len(self.output_neuron_indices))]
+
+            if len(valid_prev) > 0: return True
+            else: return False
+
+        for i, output_neuron in enumerate(self.output_neurons):
+            find_neuron_inputs(output_neuron, depth=0, output_index=i)
+
+    
+    def compiled_forward_pass(self, inputs):
+        def compute_neuron(neuron, next, depth, output_index):
+            if depth > self.max_depth: return 0
+            if not neuron: return 0
+
+            neuron_inputs = None
+            if neuron.id in self.input_neuron_indices:
+                i = self.input_neuron_indices.index(neuron.id)
+                neuron_inputs = np.array([inputs[i]])
+                # print(1, inputs[i])
+
+            if neuron.id not in self.input_neuron_indices:
+                if len(neuron.valid_prev[output_index]) == 0 or len(neuron.prev) == 0: return 0
+                
+                neuron_inputs = np.array([
+                    compute_neuron(prev, next=neuron, depth=depth + 1, output_index=output_index) 
+                    for prev in neuron.valid_prev[output_index]])
+            
+                if len(neuron_inputs.shape) == 2: neuron_inputs = neuron_inputs[:, 0]
+                neuron.inputs[output_index] = neuron_inputs
+                # print(neuron_inputs)
+
+            neuron_outputs = neuron_inputs @ neuron.weights + neuron.bias
+
+            neuron_outputs = neuron_outputs[neuron.next.index(next)]
+            activation_outputs = neuron.activation(neuron_outputs)
+            neuron.outputs[output_index] = activation_outputs
+            # print(activation_outputs)
+            return activation_outputs
+
+        outputs = []
+        for i, output_neuron in enumerate(self.output_neurons):
+            outputs.append(compute_neuron(output_neuron, None, depth=0, output_index=i))
+        outputs = np.array(outputs)
+        
+        return outputs
+    
+
+    def compiled_backward_pass(self, loss, y, y_hat, alpha=0.01):
+        def differentiate_neuron(neuron, J, depth, output_index):
+            if not neuron or depth > self.max_depth: return
+
+            try:
+                inputs = neuron.inputs[output_index]
+                outputs = neuron.outputs[output_index]
+            except IndexError:
+                return
+
+            dady = neuron.activation.dydx(outputs)
+            dydx = neuron.weights
+            dydw = inputs
+            dydb = 1
+
+            dldw = np.outer(J * dady, dydw)
+            dldb = J * dady * dydb
+
+            # print(J, dady, dydb)
+
+            neuron.weights -= alpha * dldw.T
+            neuron.bias -= alpha * dldb[0]
+
+            J_next = np.mean(J * dady * dydx, keepdims=True)
+            for prev in neuron.valid_prev[output_index]:
+                differentiate_neuron(prev, J_next, depth=depth + 1, output_index=output_index)
+
+        dlda = loss.dydx(y, y_hat)
+        for i, output_neuron in enumerate(self.output_neurons):
+            differentiate_neuron(output_neuron, dlda, depth=0, output_index=i)
+
+
     def forward_pass(self, inputs, max_depth=7):
         def compute_neuron(neuron, next, depth):
             if not neuron: return np.array([0])
@@ -268,13 +376,13 @@ class NeuralNetwork():
             if not neuron.id in self.input_neuron_indices:
                 neuron_inputs = np.array([compute_neuron(prev, next=neuron, depth=depth + 1) for prev in neuron.prev])
             if len(neuron_inputs.shape) == 2: neuron_inputs = neuron_inputs[:, 0]
-            neuron.inputs.append(neuron_inputs)
+            neuron.inputs_.append(neuron_inputs)
 
             neuron_outputs = neuron_inputs @ neuron.weights + neuron.bias
 
             if next: neuron_outputs = neuron_outputs[neuron.next.index(next)]
             activation_outputs = neuron.activation(neuron_outputs)
-            neuron.outputs.append(activation_outputs)
+            neuron.outputs_.append(activation_outputs)
             return activation_outputs
     
         outputs = np.array([compute_neuron(output_neuron, None, depth=0) for output_neuron in self.output_neurons])
@@ -283,12 +391,11 @@ class NeuralNetwork():
     
     def backward_pass(self, loss, y, y_hat, alpha=0.01, max_depth=7):
         def differentiate_neuron(neuron, J, depth=0):
-            # print(1)
             if not neuron or depth > max_depth: return
 
             try:
-                inputs = neuron.inputs.popleft()
-                outputs = neuron.outputs.popleft()
+                inputs = neuron.inputs_.popleft()
+                outputs = neuron.outputs_.popleft()
             except IndexError:
                 return
 
@@ -316,22 +423,40 @@ class NeuralNetwork():
 
 
 network = NeuralNetwork(
-    num_neurons         = 64,
+    num_neurons         = 32,
     edge_probability    = 0.7,
     num_input_neurons   = 4,
     num_output_neurons  = 1
 )
-network.visualize_network()
+# network.visualize_network()
+# network.visualize_network(show_weight=True)
+
+network.compile(max_depth=5)
 print('\n\n')
 network.print_info()
 
 print('Training network')
-def train(X, Y, epochs=20, max_depth=5):
+def train_compiled(X, Y, epochs=10):
     loss_layer = MSE()
     for epoch in range(epochs):
         total_loss = 0
         train_size = len(X)
-        for i in tqdm(range(train_size)):
+        for i in tqdm(range(train_size), desc=f'           Epoch {epoch + 1} | '):
+            x, y = X[i], Y[i]
+            x, y = np.array(x), np.array(y)
+            # print('Forward pass')
+            y_hat = network.compiled_forward_pass(x)
+            total_loss += loss_layer(y, y_hat)
+            # print('Backward Pass')
+            network.compiled_backward_pass(loss_layer, y, y_hat, alpha=5e-6)
+        print(f'Epoch {epoch + 1} | loss : {total_loss / train_size}')
+
+def train(X, Y, epochs=10, max_depth=5):
+    loss_layer = MSE()
+    for epoch in range(epochs):
+        total_loss = 0
+        train_size = len(X)
+        for i in tqdm(range(train_size), desc=f'           Epoch {epoch + 1} | '):
             x, y = X[i], Y[i]
             x, y = np.array(x), np.array(y)
             # print(x)
@@ -339,7 +464,7 @@ def train(X, Y, epochs=20, max_depth=5):
             # print(y, y_hat)
             total_loss += loss_layer(y, y_hat)
             network.backward_pass(loss_layer, y, y_hat, alpha=5e-6, max_depth=max_depth)
-        print(f'epoch {epoch + 1} | loss : {total_loss / train_size}')
+        print(f'Epoch {epoch + 1} | loss : {total_loss / train_size}')
 
 
 X = [[0.5488135,  0.71518937, 0.60276338, 0.54488318],
@@ -349,9 +474,8 @@ X = [[0.5488135,  0.71518937, 0.60276338, 0.54488318],
  [0.0202184,  0.83261985, 0.77815675, 0.87001215]]
 Y = [7.66535545, 8.01574137, 8.4595805, 6.04627032, 6.64351887]
 
-train(X, Y)
-
-
+train_compiled(X, Y, epochs=10)
+train(X, Y, epochs=10)
 
 
 '''
@@ -369,12 +493,14 @@ print('Input neurons:', network.input_neuron_indices)
 print('Output neurons: ', network.output_neuron_indices)
 
 paths = network.find_path(
-    start               = network.input_neurons[0],
-    end                 = network.output_neurons[0],
+    start               = network.output_neuron_indices[0],
+    end                 = network.input_neuron_indices[0],
     max_depth           = 7,
     print_info          = True,
     prune               = False
 )
 
+
 network.visualize_network(paths=paths)
+
 '''
