@@ -69,8 +69,8 @@ class RMSProp():
         bias_reg = neuron.bias * self.reg
 
         # Apply RMSProp update
-        neuron.weights += self.alpha * dldw / (np.sqrt(neuron.m_weights) + self.epsilon)
-        neuron.bias += self.alpha * dldb / (np.sqrt(neuron.m_bias) + self.epsilon)
+        neuron.weights -= self.alpha * dldw / (np.sqrt(neuron.m_weights) + self.epsilon)
+        neuron.bias -= self.alpha * dldb / (np.sqrt(neuron.m_bias) + self.epsilon)
 
         neuron.weights -= weights_reg
         neuron.bias -= bias_reg
@@ -130,7 +130,7 @@ class ReLU(Diff):
         return x * (x > 0)
     
     def dydx(self, output):
-        return np.array(output > 0)
+        return np.array(output > 0, dtype=np.float32)
 
 
 '''
@@ -144,7 +144,7 @@ class MeanSquaredError(Diff):
         return np.mean(np.square(y - y_hat))
     
     def dydx(self, y, y_hat):
-        return 2 / max(1, np.sum(y.shape)) * (y - y_hat)
+        return 2 / max(1, np.sum(y.shape)) * (y_hat - y)
 
 
 '''
@@ -187,8 +187,8 @@ class Neuron(Diff):
         np.random.seed(42) # optional deterministic weight initialization
         self.input_size = max(len(self.prev), 1)
         self.output_size = len(self.next)
-        self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.5
-        self.bias = np.random.normal(self.output_size) * 0.5
+        self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.1
+        self.bias = np.random.normal(self.output_size) * 0.1
 
         self.inputs = np.zeros(self.input_size)
         self.next_inputs = np.zeros(self.input_size)
@@ -228,6 +228,21 @@ class ContinuousNetwork():
         self.initialize_neuron_graph()
         self.optimizer = ADAM()
 
+        self.metrics = {
+            'loss': [],
+            'energy':  [],
+            'prop_input': [],
+
+            'grad_energy': [],
+            'prop_grad': [],
+
+            'weight_energy': [],
+
+            'pred': [],
+            'true': [],
+            'output_grad': []
+        }
+
     '''
     Initializes the network adjacency matrix and neuron positions
         
@@ -241,6 +256,11 @@ class ContinuousNetwork():
         def sort_by_x(neuron_positions):
             # Sort the spatially arranged neurons by x position
             sorted_neurons = sorted(neuron_positions.items(), key=lambda item: item[1][0])
+            sorted_list = [(index, position) for index, position in sorted_neurons]
+            return sorted_list
+        def sort_by_y(neuron_positions):
+            # Sort the spatially arranged neurons by x position
+            sorted_neurons = sorted(neuron_positions.items(), key=lambda item: item[1][1])
             sorted_list = [(index, position) for index, position in sorted_neurons]
             return sorted_list
 
@@ -261,12 +281,12 @@ class ContinuousNetwork():
             
             return adjacency_matrix
 
-        model_adjacency_matrix = np.random.random((num_neurons, num_neurons)) < edge_probability
+        model_adjacency_matrix = np.random.random((num_neurons, num_neurons)) < 0.5
         adjacency_matrix_positions = nx.spring_layout(nx.Graph(model_adjacency_matrix))
         self.neuron_positions = adjacency_matrix_positions
         sorted_adjacency_matrix_positions = sort_by_x(adjacency_matrix_positions)
-        
         self.input_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[:self.num_input_neurons]]
+        sorted_adjacency_matrix_positions = sort_by_y(adjacency_matrix_positions)
         self.output_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[-self.num_output_neurons:]]
 
         adjacency_matrix = generate_postiional_adjacency_matrix(adjacency_matrix_positions, edge_probability)
@@ -326,7 +346,7 @@ class ContinuousNetwork():
         self.optimizer = optimizer
 
     '''
-    Compute forward pass depth-first
+    Compute forward pass step
     '''
     def forward_pass(self, inputs, decay=0.1):
         network_output = np.zeros(self.num_output_neurons)
@@ -337,21 +357,28 @@ class ContinuousNetwork():
             if not neuron in self.input_neurons:
                 neuron.inputs = neuron.next_inputs
 
-            neuron_outputs = neuron.activation(neuron.inputs @ neuron.weights + neuron.bias) * (1 - decay)
+            neuron.outputs = neuron.activation(neuron.inputs @ neuron.weights + neuron.bias) * (1 - decay)
             if neuron in self.output_neurons:
                 output_index = self.output_neurons.index(neuron)
-                network_output[output_index] = neuron_outputs
+                network_output[output_index] = neuron.outputs
             else:
-                for next, output in zip(neuron.next, neuron_outputs):
+                for next, output in zip(neuron.next, neuron.outputs):
                     input_index = next.prev.index(neuron)
                     next.next_inputs[input_index] = output
 
         return network_output
     
     '''
-    Compute backward pass breadth-first
+    Compute backward pass step
     '''
-    def backward_pass(self, loss, y, y_hat, decay=0.01, t=1):
+    def backward_pass(self, loss, y, y_hat, decay=0.01, update_metrics=True):
+        # Metrics
+        energy = 0
+        grad_energy = 0
+        weight_energy = 0
+        prop_input = 0
+        prop_grad = 0
+
         dlda = loss.dydx(y, y_hat)
         for i, neuron in enumerate(self.output_neurons):
             neuron.input_J = np.array([dlda[i]])
@@ -372,20 +399,71 @@ class ContinuousNetwork():
 
             output_J = dydx @ (neuron.input_J * dady) * (1 - decay) # signal dropoff
 
+            # Metrics
+            if update_metrics:
+                energy += np.sum(np.abs(neuron.inputs)) / self.num_neurons
+                grad_energy += np.sum(np.abs(neuron.input_J)) / self.num_neurons
+                weight_energy += np.sum(np.abs(neuron.weights)) / self.num_neurons
+                prop_input += np.mean(neuron.inputs > 1e-7) / self.num_neurons
+                prop_grad += np.mean(neuron.input_J > 1e-7) / self.num_neurons
+
             if neuron in self.input_neurons:
                 continue
             for prev, prev_J in zip(neuron.prev, output_J):
                 input_index = prev.next.index(neuron)
                 prev.next_input_J[input_index] = prev_J
-    
-    def compute_internal_energy(self):
-        return np.sum([np.sum(np.abs(neuron.inputs)) for neuron in self.neurons])
-    
-    def compute_gradient_energy(self):
-        return np.sum([np.sum(np.abs(neuron.input_J)) for neuron in self.neurons])
-    
-    def compute_weight_energy(self):
-        return np.sum([np.sum(np.abs(neuron.weights)) for neuron in self.neurons])
+
+        if update_metrics:
+            self.metrics['loss'].append(loss(y, y_hat))
+            self.metrics['pred'].append(np.sum(y_hat))
+            self.metrics['true'].append(np.sum(y))
+            
+            self.metrics['energy'].append(energy)
+            self.metrics['grad_energy'].append(grad_energy)
+            self.metrics['weight_energy'].append(weight_energy)
+            self.metrics['prop_input'].append(prop_input)
+            self.metrics['prop_grad'].append(prop_grad)
+
+        
+    '''
+    Unused - computes computable network metrics
+    '''
+    def update_metrics(self):
+        def compute_internal_energy(self):
+            return np.mean([np.sum(np.abs(neuron.inputs)) for neuron in self.neurons])
+        
+        def compute_gradient_energy(self):
+            return np.mean([np.sum(np.abs(neuron.input_J)) for neuron in self.neurons])
+        
+        def compute_weight_energy(self):
+            return np.mean([np.sum(np.abs(neuron.weights)) for neuron in self.neurons])
+        
+        def compute_prop_input(self):
+            return 1 - np.mean(np.array([np.sum(np.abs(neuron.inputs)) for neuron in self.neurons]) < 1e-6)
+        
+        def compute_prop_grad(self):
+            return 1 - np.mean(np.array([np.sum(np.abs(neuron.input_J)) for neuron in self.neurons]) < 1e-6)
+        
+        self.metrics['energy'].append(compute_internal_energy(self))
+        self.metrics['grad_energy'].append(compute_gradient_energy(self))
+        self.metrics['weight_energy'].append(compute_weight_energy(self))
+        self.metrics['prop_input'].append(compute_prop_input(self))
+        self.metrics['prop_grad'].append(compute_prop_grad(self))
+
+    def get_metrics_string(self, metrics=['pred', 'loss', 'energy', 'grad_energy', 'prop_input', 'prop_grad']):
+        metrics_string = ''
+        for metric in metrics:
+            metrics_string += metric + '=' + str(round(self.metrics[metric][-1], 3)) + '; '
+        return metrics_string[:-2]
+
+    def plot_metrics(self, title='', metrics=['pred', 'true', 'loss', 'energy', 'grad_energy']):
+        for metric in metrics:
+            plt.plot([max(-100, min(1000, x)) for x in self.metrics[metric]], label=metric)
+
+        plt.title(title)
+        plt.legend()
+        plt.show()
+
 
 
 def main():
@@ -397,6 +475,7 @@ def main():
     )
     # visualize_network(network)
     # visualize_network(network, paths=[[1, 4, 5, 3, 4, 7, 8]], show_weight=True)
+    plot_graph(network)
 
 
 if __name__ == '__main__':
