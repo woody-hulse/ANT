@@ -118,6 +118,36 @@ class Linear(Diff):
     
     def dydx(self, output):
         return np.ones_like(output)
+
+
+'''
+Sigmoid activation function
+'''
+class Sigmoid(Diff):
+    def __init__(self):
+        super().__init__()
+    
+    def __call__(self, x):
+        # print(x, 1 / (1 + np.exp(-x)))
+        return 1 / (1 + np.exp(-x))
+
+    def dydx(self, output):
+        return self(output) * (1 - self(output))
+
+
+'''
+Sigmoid activation function between (-1, 1)
+'''
+class Sigmoid2(Diff):
+    def __init__(self):
+        super().__init__()
+    
+    def __call__(self, x):
+        return 4 / (1 + np.exp(-x)) - 1
+
+    def dydx(self, output):
+        return 4 * self(output) * (1 - self(output))
+
     
 '''
 ReLU activation function
@@ -136,7 +166,7 @@ class ReLU(Diff):
 '''
 Mean squared error loss
 '''
-class MeanSquaredError(Diff):
+class MSE(Diff):
     def __init__(self):
         super().__init__()
     
@@ -145,6 +175,32 @@ class MeanSquaredError(Diff):
     
     def dydx(self, y, y_hat):
         return 2 / max(1, np.sum(y.shape)) * (y_hat - y)
+    
+'''
+Experimental RL loss
+'''
+class RL(Diff):
+    def __init__(self):
+        super().__init__()
+        self.epsilon = 1e-5
+    
+    def __call__(self, y, y_hat):
+        return np.exp(y_hat - y)
+    
+    def dydx(self, y, y_hat):
+        return np.exp(y_hat - y)
+
+
+class BCE(Diff):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, y, y_hat):
+        return -(y * np.log(y_hat) + (1 - y) * np.log(1 - y_hat))
+    
+    def dydx(self, y, y_hat):
+        # print(y, y_hat)
+        return -y * (1 / y_hat) - (1 - y) * (1 / (1 - y_hat))
 
 
 '''
@@ -180,11 +236,9 @@ class Neuron(Diff):
         self.weight = np.random.normal()
         self.bias = 0
         self.activation = ReLU()
-
-        self.compiled = False
     
     def initialize_weights(self):
-        np.random.seed(42) # optional deterministic weight initialization
+        # np.random.seed(42) # optional deterministic weight initialization
         self.input_size = max(len(self.prev), 1)
         self.output_size = len(self.next)
         self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.1
@@ -348,15 +402,17 @@ class ContinuousNetwork():
     '''
     Compute forward pass step
     '''
-    def forward_pass(self, inputs, decay=0.1):
+    def forward_pass(self, inputs, decay=0):
         network_output = np.zeros(self.num_output_neurons)
         for i, neuron in enumerate(self.input_neurons):
+            # print(inputs)
             neuron.inputs = np.array([inputs[i]])
 
         for neuron in self.neurons:
             if not neuron in self.input_neurons:
                 neuron.inputs = neuron.next_inputs
 
+        for neuron in self.neurons:
             neuron.outputs = neuron.activation(neuron.inputs @ neuron.weights + neuron.bias) * (1 - decay)
             if neuron in self.output_neurons:
                 output_index = self.output_neurons.index(neuron)
@@ -371,7 +427,7 @@ class ContinuousNetwork():
     '''
     Compute backward pass step
     '''
-    def backward_pass(self, loss, y, y_hat, decay=0.01, update_metrics=True):
+    def backward_pass(self, loss, y, y_hat, decay=0, update_metrics=True):
         # Metrics
         energy = 0
         grad_energy = 0
@@ -387,6 +443,8 @@ class ContinuousNetwork():
             if not neuron in self.output_neurons:
                 neuron.input_J = neuron.next_input_J
 
+        for neuron in self.neurons:
+            neuron.input_J += np.random.normal(size=neuron.input_J.size) * 0.01
             dady = neuron.activation.dydx(neuron.outputs)
             dydx = neuron.weights
             dydw = neuron.inputs
@@ -453,7 +511,7 @@ class ContinuousNetwork():
     def get_metrics_string(self, metrics=['pred', 'loss', 'energy', 'grad_energy', 'prop_input', 'prop_grad']):
         metrics_string = ''
         for metric in metrics:
-            metrics_string += metric + '=' + str(round(self.metrics[metric][-1], 3)) + '; '
+            metrics_string += metric + '=' + f'{np.sum(self.metrics[metric][-1]) : 10.3f}' + '; '
         return metrics_string[:-2]
 
     def plot_metrics(self, title='', metrics=['pred', 'true', 'loss', 'energy', 'grad_energy']):

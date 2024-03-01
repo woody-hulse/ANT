@@ -1,4 +1,4 @@
-from continuous_network import ContinuousNetwork, MeanSquaredError, SGD, ADAM, RMSProp
+from continuous_network import ContinuousNetwork, MSE, SGD, ADAM, RMSProp
 
 from utils import *
 from datasets import *
@@ -6,7 +6,7 @@ from datasets import *
 
 def train(network, X, Y, epochs=10):
     debug_print([f'Training {network.name}'])
-    loss_layer = MeanSquaredError()
+    loss_layer = MSE()
     for epoch in range(epochs):
         total_loss = 0
         train_size = len(X)
@@ -21,7 +21,7 @@ def train(network, X, Y, epochs=10):
 def continuous_train(network, X, Y, time=1000, metrics=True, gif=False):
     tracemalloc.start()
 
-    loss_layer = MeanSquaredError()
+    loss_layer = MSE()
 
     pbar = tqdm(range(time))
 
@@ -33,8 +33,8 @@ def continuous_train(network, X, Y, time=1000, metrics=True, gif=False):
 
         y_hat = network.forward_pass(x, decay=0)
         network.backward_pass(loss_layer, y, y_hat, decay=0, update_metrics=metrics)
-        if metrics: pbar.set_description(f't={t:05} ' + network.get_metrics_string())
-        else: pbar.set_description(f't={t:05}')
+        if metrics: pbar.set_description(f't={t+1:05}; ' + network.get_metrics_string())
+        else: pbar.set_description(f't={t+1:05}')
     
     if metrics:
         network.plot_metrics()
@@ -53,7 +53,7 @@ def main():
     network = ContinuousNetwork(
     num_neurons         = 128,
     edge_probability    = 1.3,
-    num_input_neurons   = 2,
+    num_input_neurons   = 1,
     num_output_neurons  = 1
     )
     # visualize_network(network)
@@ -62,11 +62,11 @@ def main():
     network.print_info()
     sgd = SGD(alpha=1e-4)
     adam = ADAM(alpha=1e-4, beta1=0.9, beta2=0.99, reg=0)
-    rmsprop = RMSProp(alpha=1e-4, beta=0.99, reg=0)
+    rmsprop = RMSProp(alpha=3e-5, beta=0.99, reg=0)
     network.set_optimizer(rmsprop)
 
-    time = 1000
-    X, Y = subtract_sinusoidal(time)
+    time = 10000
+    X, Y = ripple_sinusoidal_pulse(time, n=20)
     continuous_train(network, X, Y, time=time, metrics=True, gif=False)
 
 

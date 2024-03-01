@@ -144,13 +144,13 @@ def plot_graph(network, title='', save=False, save_directory='graph_images/'):
 def convert_files_to_gif(directory, name):
     images = []
     for filename in sorted(os.listdir(directory)):
-        if filename.endswith((".png", ".jpg", ".jpeg")):
+        if filename.endswith(('.png', '.jpg', '.jpeg')):
             file_path = os.path.join(directory, filename)
             images.append(imageio.imread(file_path))
 
     with imageio.get_writer(f'{directory}{name}', mode='I') as writer:
         for filename in sorted(os.listdir(directory)):
-            if filename.endswith((".png", ".jpg", ".jpeg")):
+            if filename.endswith(('.png', '.jpg', '.jpeg')):
                 image = imageio.imread(directory + filename)
                 writer.append_data(image)
 
