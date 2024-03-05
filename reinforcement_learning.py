@@ -38,7 +38,8 @@ def visualize_episode(env, network, name):
 
     debug_print(['Creating gif'])
     ip.display.Image(open('rl_results' + name + '.gif', 'rb').read())
-    
+
+
 def watch_rl_episode(network, env):
     state = env.reset()[0]
     done = False
@@ -116,13 +117,20 @@ def continuous_rl_train(network, env, episodes=1000, time=10000):
             pbar.set_description(f't={t+1:05}; reward={round(reward, 3)}; action={round(np.sum(action), 3)}; ' + network.get_metrics_string(metrics=['loss', 'energy', 'grad_energy', 'prop_input', 'prop_grad']))
 
 
-def continuous_rl_train_2(network, env, episodes=1000, time=1000, render=False):
+def continuous_rl_train_2(network, env, episodes=1000, time=500, render=False, plot=True):
     gamma = 0.99  # Discount factor for future rewards
 
     loss_fn = MSE()
 
+    episode_rewards = []
+    passed = False
     for episode in range(episodes):
         state = env.reset()[0]
+
+        if not passed:
+            for i in range(3):
+                network.forward_pass(state)
+            network.clear_jacobians(0)
 
         image_frames = []
         G = 0
@@ -133,16 +141,18 @@ def continuous_rl_train_2(network, env, episodes=1000, time=1000, render=False):
                 image_array = env.render()
                 image_frame = Image.fromarray(image_array)
                 image_frames.append(image_frame)
-            action = network.forward_pass(state)
+            for i in range(1):
+                output = network.forward_pass(state)
+            action = int(np.ceil(output[0] - 0.5))
             next_state, reward, done, _, _ = env.step(action)
 
             G = reward + gamma * G
-            network.backward_pass(loss_fn, action, G)
+            network.backward_pass(loss_fn, np.array([state[2]]), np.array([0]))
 
             max_chars = 160
             total_reward += reward
-            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(action) : 7.3f}; ' + \
-                network.get_metrics_string(metrics=['loss', 'energy', 'grad_energy', 'prop_input', 'prop_grad'])
+            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(output) : 7.3f}; ' + \
+                network.get_metrics_string(metrics=['loss', 'energy', 'grad_energy'])
             
             if len(pbar_string) > max_chars: pbar_string = pbar_string[:max_chars - 3] + '...'
 
@@ -150,7 +160,14 @@ def continuous_rl_train_2(network, env, episodes=1000, time=1000, render=False):
 
             state = next_state
 
-            if done: break
+            if done: 
+                passed = False
+                break
+            elif t == time - 1:
+                passed = True
+
+
+        episode_rewards.append(total_reward)
 
         if render:
             image_frames[0].save('rl_results/episode' + str(episode) + '.gif', 
@@ -159,23 +176,30 @@ def continuous_rl_train_2(network, env, episodes=1000, time=1000, render=False):
                             loop = 0,
                             append_images = image_frames[1:])
 
+    if plot:
+        plt.title('Rewards over episodes')
+        plt.plot(episode_rewards)
+        plt.show()
+
 
 
 def main():
+    # run internal mechansim until convergence
+    # 'CartPole-v1'
     # 'Pendulum-v1'
     # 'MountainCarContinuous-v0'
     # 'BipedalWalker-v3'
     # 'Ant-v2'
-    env = gym.make('Pendulum-v1', render_mode='rgb_array')
+    env = gym.make('CartPole-v1', render_mode='rgb_array')
 
     network = ContinuousNetwork(
-    num_neurons         = 64,
-    edge_probability    = 1.6,
+    num_neurons         = 128,
+    edge_probability    = 0.8,
     num_input_neurons   = env.observation_space.shape[0],
-    num_output_neurons  = env.action_space.shape[0]
+    num_output_neurons  = 1
     )
     for neuron in network.output_neurons:
-        neuron.activation = Sigmoid2()
+        neuron.activation = Sigmoid()
     # visualize_network(network)
     # visualize_network(network, show_weight=True)
 
@@ -183,9 +207,9 @@ def main():
     rmsprop = RMSProp(alpha=1e-5, beta=0.99, reg=0)
     network.set_optimizer(rmsprop)
 
-    continuous_rl_train_2(network, env, episodes=200, render=True)
+    continuous_rl_train_2(network, env, episodes=1000, render=False, plot=True)
     # watch_rl_episode(network, env)
-    visualize_episode(env, network, name='prelim_rl_results')
+    # visualize_episode(env, network, name='prelim_rl_results')
 
 
 if __name__ == '__main__':

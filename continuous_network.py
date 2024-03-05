@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from collections import deque
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
 
 from utils import *
 
@@ -259,6 +260,38 @@ class Neuron(Diff):
 
 
 '''
+Neuron updating function (for parallelization)
+    - Investigate moving this into the neuron class
+'''
+def update_neuron(neuron, optimizer, decay=0.0, update_metrics=False):
+    neuron.input_J += np.random.normal(size=neuron.input_J.size) * 0.01
+    dady = neuron.activation.dydx(neuron.outputs)
+    dydx = neuron.weights
+    dydw = neuron.inputs
+    dydb = np.ones_like(neuron.bias)
+
+    dldw = np.outer(dydw, neuron.input_J * dady)
+    dldb = neuron.input_J * dady * dydb
+
+    # Assume self.optimizer is adapted to be called here directly
+    optimizer(neuron, [dldw, dldb])
+
+    output_J = dydx @ (neuron.input_J * dady) * (1 - decay) # signal dropoff
+
+    metrics = None
+    if update_metrics:
+        metrics = {
+            'energy': np.sum(np.abs(neuron.inputs)),
+            'grad_energy': np.sum(np.abs(neuron.input_J)),
+            'weight_energy': np.sum(np.abs(neuron.weights)),
+            'prop_input': np.mean(neuron.inputs > 1e-7),
+            'prop_grad': np.mean(neuron.input_J > 1e-7),
+        }
+
+    return output_J, metrics
+
+
+'''
 Class defining the neuron network
 
 Contains:
@@ -413,7 +446,7 @@ class ContinuousNetwork():
                 neuron.inputs = neuron.next_inputs
 
         for neuron in self.neurons:
-            neuron.outputs = neuron.activation(neuron.inputs @ neuron.weights + neuron.bias) * (1 - decay)
+            neuron.outputs = neuron.activation(neuron.inputs @ neuron.weights) # * (1 - decay)
             if neuron in self.output_neurons:
                 output_index = self.output_neurons.index(neuron)
                 network_output[output_index] = neuron.outputs
@@ -423,7 +456,58 @@ class ContinuousNetwork():
                     next.next_inputs[input_index] = output
 
         return network_output
-    
+
+    '''
+    Parallelized backward pass [SLOW! UNUSED]
+    '''
+    def parallel_backward_pass(self, loss, y, y_hat, decay=0, update_metrics=True):
+        # Metrics
+        energy = 0
+        grad_energy = 0
+        weight_energy = 0
+        prop_input = 0
+        prop_grad = 0
+
+        dlda = loss.dydx(y, y_hat)
+        for i, neuron in enumerate(self.output_neurons):
+            neuron.input_J = np.array([dlda[i]])
+
+        for neuron in self.neurons:
+            if not neuron in self.output_neurons:
+                neuron.input_J = neuron.next_input_J
+        
+        with ProcessPoolExecutor() as executor:
+            results = list(executor.map(
+                update_neuron, 
+                self.neurons, 
+                [self.optimizer] * len(self.neurons), 
+                [decay] * len(self.neurons), 
+                [update_metrics] * len(self.neurons)))
+
+        for neuron, (output_J, metrics) in zip(self.neurons, results):
+            if update_metrics:
+                energy += metrics['energy']
+                grad_energy += metrics['grad_energy']
+                weight_energy += metrics['weight_energy']
+                prop_input += metrics['prop_input']
+                prop_grad += metrics['prop_grad']
+            
+            if neuron in self.input_neurons:
+                continue
+            for prev, prev_J in zip(neuron.prev, output_J):
+                prev.input_J = prev_J
+        
+        if update_metrics:
+            self.metrics['loss'].append(loss(y, y_hat))
+            self.metrics['pred'].append(np.sum(y_hat))
+            self.metrics['true'].append(np.sum(y))
+            
+            self.metrics['energy'].append(energy)
+            self.metrics['grad_energy'].append(grad_energy)
+            self.metrics['weight_energy'].append(weight_energy)
+            self.metrics['prop_input'].append(prop_input)
+            self.metrics['prop_grad'].append(prop_grad)
+
     '''
     Compute backward pass step
     '''
@@ -444,21 +528,19 @@ class ContinuousNetwork():
                 neuron.input_J = neuron.next_input_J
 
         for neuron in self.neurons:
-            neuron.input_J += np.random.normal(size=neuron.input_J.size) * 0.01
             dady = neuron.activation.dydx(neuron.outputs)
             dydx = neuron.weights
             dydw = neuron.inputs
-            dydb = np.ones_like(neuron.bias)
 
             dldw = np.outer(dydw, neuron.input_J * dady)
-            dldb = neuron.input_J * dady * dydb
+            dldb = 0 # neuron.input_J * dady
 
             self.optimizer(neuron, [dldw, dldb])
 
-            output_J = dydx @ (neuron.input_J * dady) * (1 - decay) # signal dropoff
+            output_J = dydx @ (neuron.input_J * dady) # * (1 - decay) # signal dropoff
 
             # Metrics
-            if update_metrics:
+            if update_metrics and False: # disabling for speed reasons
                 energy += np.sum(np.abs(neuron.inputs)) / self.num_neurons
                 grad_energy += np.sum(np.abs(neuron.input_J)) / self.num_neurons
                 weight_energy += np.sum(np.abs(neuron.weights)) / self.num_neurons
@@ -481,6 +563,14 @@ class ContinuousNetwork():
             self.metrics['weight_energy'].append(weight_energy)
             self.metrics['prop_input'].append(prop_input)
             self.metrics['prop_grad'].append(prop_grad)
+
+    '''
+    Clears all network jacobians
+    '''
+    def clear_jacobians(self, alpha=0):
+        for neuron in self.neurons:
+            neuron.input_J *= alpha
+            neuron.next_input_J *= alpha
 
         
     '''

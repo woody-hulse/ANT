@@ -42,9 +42,6 @@ def continuous_train(network, X, Y, time=1000, metrics=True, gif=False):
     if gif:
         convert_files_to_gif(directory='graph_images/', name='network_weights.gif')
 
-    # print(network.metrics['prop_input'])
-    # print(network.metrics['prop_grad'])
-
     current, peak = tracemalloc.get_traced_memory()
     debug_print([f'Current memory usage is {current / 1024**2:.2f}MB; Peak was {peak / 1024**2:.2f}MB'])
     tracemalloc.stop()
