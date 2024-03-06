@@ -119,19 +119,19 @@ def plot_graph(network, title='', save=False, save_directory='graph_images/'):
     neuron_colors = [output_neuron_color if i in network.output_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
 
     # Set neuron sizes
-    neuron_sizes = [15 for _ in range(len(G.nodes))]
+    neuron_sizes = [0 for _ in range(len(G.nodes))]
     neuron_sizes = [30 if i in network.input_neuron_indices + network.output_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
     
     rows, cols = np.where(network.adjacency_matrix > 0)
     edges = zip(rows.tolist(), cols.tolist())
     for edge in edges:
-        J = network.neurons[edge[0]].input_J
-        out_index = network.neurons[edge[0]].next.index(network.neurons[edge[1]])
+        J = network.neurons[edge[1]].inputs
+        out_index = network.neurons[edge[1]].prev.index(network.neurons[edge[0]])
         weight = np.sum(J[out_index])
         G.add_edge(edge[0], edge[1], weight=weight)
     
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-    nx.draw(G, pos=network.neuron_positions, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=weights, width=0.5)
+    nx.draw(G, pos=network.neuron_positions, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=weights, width=1)
     
     plt.title(title)
     if save:
@@ -148,7 +148,7 @@ def convert_files_to_gif(directory, name):
             file_path = os.path.join(directory, filename)
             images.append(imageio.imread(file_path))
 
-    with imageio.get_writer(f'{directory}{name}', mode='I') as writer:
+    with imageio.get_writer(f'{name}', mode='I') as writer:
         for filename in sorted(os.listdir(directory)):
             if filename.endswith(('.png', '.jpg', '.jpeg')):
                 image = imageio.imread(directory + filename)
@@ -158,7 +158,7 @@ def convert_files_to_gif(directory, name):
     
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
-        if os.path.isfile(file_path) and filename != name:
+        if os.path.isfile(file_path):
             os.remove(file_path)
 
 

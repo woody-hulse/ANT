@@ -5,6 +5,8 @@ import time
 import cv2
 from PIL import Image
 import IPython as ip
+import seaborn as sns
+sns.set_style(style='whitegrid',rc={'font.family': 'serif','font.serif':'Times'})
 
 from utils import *
 from continuous_network import *
@@ -63,96 +65,62 @@ def watch_rl_episode(network, env):
     cv2.destroyAllWindows()
     env.close()
 
-def continuous_rl_train(network, env, episodes=1000, time=10000):
-    debug_print([f'Training {network.name}'])
-
-    loss_layer = RL()
-    for episode in range(episodes):
-        state = env.reset()[0]
-        total_reward = 0
-
-        pbar = tqdm(range(time))
-        p_reward = 0
-        p_action = np.zeros(network.num_output_neurons)
-
-        for t in pbar:
-            action = network.forward_pass(state)
-            state, reward, done, info, _ = env.step(action)
-            total_reward += reward
-
-            if done:
-                break
-
-            y_hat = arr([reward for _ in range(network.num_output_neurons)])
-            '''
-            y_hat = np.zeros(network.num_output_neurons)
-            for i, a in enumerate(action):
-                action_a = p_action.copy()
-                action_a[i] = a
-
-                env_copy = copy.deepcopy(env)
-                _, reward, _, _, _ = env_copy.step(action_a)
-                y_hat[i] = reward
-            '''
-
-            # Compute the expected Q values
-            # next_state = network.forward_pass(state)
-            # expected_state_action_values = (next_state * 0.99) + reward
-
-            # print(expected_state_action_values.shape)
-
-            # Compute Huber loss
-            # loss = loss_layer(state, expected_state_action_values)
-            # print(p_reward, y_hat)
-            network.backward_pass(
-                loss_layer, 
-                y_hat * 0.99, 
-                arr([p_reward for _ in range(network.num_output_neurons)]),
-                decay=0.0, 
-                update_metrics=True
-            )
-
-            p_reward = reward
-
-            pbar.set_description(f't={t+1:05}; reward={round(reward, 3)}; action={round(np.sum(action), 3)}; ' + network.get_metrics_string(metrics=['loss', 'energy', 'grad_energy', 'prop_input', 'prop_grad']))
-
-
-def continuous_rl_train_2(network, env, episodes=1000, time=500, render=False, plot=True):
+def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False):
     gamma = 0.99  # Discount factor for future rewards
 
     loss_fn = MSE()
 
     episode_rewards = []
-    passed = False
+    episode_energies = []
+    episode_mean_energies = []
+    episode_utilizations = []
+    episode_mean_utilizations = []
+    episode_gradient_utilizations = []
+    episode_mean_gradient_utilizations = []
+    best_t = 0
     for episode in range(episodes):
         state = env.reset()[0]
-
-        if not passed:
-            for i in range(3):
-                network.forward_pass(state)
-            network.clear_jacobians(0)
 
         image_frames = []
         G = 0
         total_reward = 0
+        p_reward = 0
+
+        for i in range(15):
+            network.forward_pass(np.zeros_like(state))
+
         pbar = tqdm(range(time))
         for t in pbar:
             if render:
                 image_array = env.render()
                 image_frame = Image.fromarray(image_array)
                 image_frames.append(image_frame)
-            for i in range(1):
-                output = network.forward_pass(state)
-            action = int(np.ceil(output[0] - 0.5))
+
+            '''
+            For pole cart: 
+                action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
+                y      = np.array([state[2]])
+                y_hat  = np.array([0])
+            otherwise:
+                action = network.forward_pass(state)
+                y      = reward
+                y_hat  = G
+            '''
+            action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
             next_state, reward, done, _, _ = env.step(action)
 
             G = reward + gamma * G
-            network.backward_pass(loss_fn, np.array([state[2]]), np.array([0]))
+
+            y      = np.array([state[2]])
+            y_hat  = np.array([0])
+            
+            network.backward_pass(loss_fn, y, y_hat)
+            p_reward = reward
 
             max_chars = 160
             total_reward += reward
-            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(output) : 7.3f}; ' + \
-                network.get_metrics_string(metrics=['loss', 'energy', 'grad_energy'])
+            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(action) : 7.3f}; ' + \
+                network.get_metrics_string(metrics=['loss', 'energy', 'prop_input', 'prop_grad'])
             
             if len(pbar_string) > max_chars: pbar_string = pbar_string[:max_chars - 3] + '...'
 
@@ -160,54 +128,82 @@ def continuous_rl_train_2(network, env, episodes=1000, time=500, render=False, p
 
             state = next_state
 
-            if done: 
-                passed = False
-                break
-            elif t == time - 1:
-                passed = True
+            if gif:
+                plot_graph(network, title=f't{t}', save=True, save_directory='graph_images/')
 
-
-        episode_rewards.append(total_reward)
-
-        if render:
-            image_frames[0].save('rl_results/episode' + str(episode) + '.gif', 
+            if t > best_t:
+                best_t = t
+                if (done or t == time - 1) and render:
+                    image_frames[0].save(f'rl_results/episode{episode}.gif', 
                             save_all = True, 
                             duration = 20,
                             loop = 0,
                             append_images = image_frames[1:])
 
-    if plot:
-        plt.title('Rewards over episodes')
-        plt.plot(episode_rewards)
-        plt.show()
+            if done: break
+        
+        if gif:
+            convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
+                        
 
+        episode_utilizations.append(network.metrics['prop_input'][-1])
+        episode_mean_utilizations.append(np.mean(network.metrics['prop_input']))
+        episode_gradient_utilizations.append(network.metrics['prop_grad'][-1])
+        episode_mean_gradient_utilizations.append(np.mean(network.metrics['prop_grad']))
+        episode_energies.append(network.metrics['energy'][-1])
+        episode_mean_energies.append(np.mean(network.metrics['energy']))
+        episode_rewards.append(total_reward)
+
+    if plot:
+        fig, axes = plt.subplots(4, 1, gridspec_kw={'height_ratios': [1, 0.15, 0.15, 0.15]}, sharex=True)
+        axes[0].set_title('Rewards over episodes')
+        axes[0].plot(episode_rewards, color='blue', label='Total Reward')
+        axes[1].plot(episode_energies, color='orange', label='Energy')
+        axes[1].plot(episode_mean_energies, color='green', label='Mean Energy')
+        axes[2].plot(episode_utilizations, color='purple', label='Network Utilization')
+        axes[2].plot(episode_mean_utilizations, color='red', label='Mean Network Utilization')
+        axes[3].plot(episode_gradient_utilizations, color='teal', label='Network Gradient Utilization')
+        axes[3].plot(episode_mean_gradient_utilizations, color='violet', label='Mean Network Gradient Utilization')
+        axes[0].legend()
+        axes[1].legend()
+        axes[2].legend()
+        axes[3].legend()
+        plt.legend()
+        plt.xlabel('Episode')
+        plt.show()
 
 
 def main():
     # run internal mechansim until convergence
-    # 'CartPole-v1'
-    # 'Pendulum-v1'
-    # 'MountainCarContinuous-v0'
-    # 'BipedalWalker-v3'
-    # 'Ant-v2'
+
+    # '*' indicates that model succeeds at this task
+    #   'CartPole-v1'
+    #   'Pendulum-v1'
+    #   'MountainCarContinuous-v0'
+    #   'BipedalWalker-v3'
+    #   'Ant-v2'
     env = gym.make('CartPole-v1', render_mode='rgb_array')
+
+    try: num_output_neurons = env.action_space.shape[0]
+    except: num_output_neurons = 1
 
     network = ContinuousNetwork(
     num_neurons         = 128,
-    edge_probability    = 0.8,
+    edge_probability    = 1.5,
     num_input_neurons   = env.observation_space.shape[0],
-    num_output_neurons  = 1
+    num_output_neurons  = num_output_neurons
     )
-    for neuron in network.output_neurons:
-        neuron.activation = Sigmoid()
     # visualize_network(network)
     # visualize_network(network, show_weight=True)
 
+    for neuron in network.output_neurons:
+        neuron.activation = Sigmoid()
+
     network.print_info()
-    rmsprop = RMSProp(alpha=1e-5, beta=0.99, reg=0)
+    rmsprop = RMSProp(alpha=5e-6, beta=0.99, reg=0)
     network.set_optimizer(rmsprop)
 
-    continuous_rl_train_2(network, env, episodes=1000, render=False, plot=True)
+    train(network, env, episodes=1000, render=False, plot=True, gif=False)
     # watch_rl_episode(network, env)
     # visualize_episode(env, network, name='prelim_rl_results')
 

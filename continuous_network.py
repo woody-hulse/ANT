@@ -264,7 +264,6 @@ Neuron updating function (for parallelization)
     - Investigate moving this into the neuron class
 '''
 def update_neuron(neuron, optimizer, decay=0.0, update_metrics=False):
-    neuron.input_J += np.random.normal(size=neuron.input_J.size) * 0.01
     dady = neuron.activation.dydx(neuron.outputs)
     dydx = neuron.weights
     dydw = neuron.inputs
@@ -540,7 +539,7 @@ class ContinuousNetwork():
             output_J = dydx @ (neuron.input_J * dady) # * (1 - decay) # signal dropoff
 
             # Metrics
-            if update_metrics and False: # disabling for speed reasons
+            if update_metrics: #and False: # disable for speed reasons
                 energy += np.sum(np.abs(neuron.inputs)) / self.num_neurons
                 grad_energy += np.sum(np.abs(neuron.input_J)) / self.num_neurons
                 weight_energy += np.sum(np.abs(neuron.weights)) / self.num_neurons
@@ -571,6 +570,14 @@ class ContinuousNetwork():
         for neuron in self.neurons:
             neuron.input_J *= alpha
             neuron.next_input_J *= alpha
+
+
+    '''
+    Applies some noise to network weights
+    '''
+    def noise(self, alpha=0.0001):
+        for neuron in self.neurons:
+            neuron.weights += np.random.normal(size=neuron.weights.shape) * alpha
 
         
     '''
