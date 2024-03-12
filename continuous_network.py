@@ -165,6 +165,35 @@ class ReLU(Diff):
 
 
 '''
+Leaky ReLU activation function
+'''
+class LeakyReLU(Diff):
+    def __init__(self, alpha=0.05):
+        super().__init__()
+        self.alpha = alpha
+
+    def __call__(self, x):
+        return x * (x > 0) + x * self.alpha * (x < 0)
+    
+    def dydx(self, output):
+        return np.array(output > 0, dtype=np.float32) + np.array(output < 0, dtype=np.float32) * self.alpha
+
+
+'''
+NReLU activation function
+'''
+class NReLU(Diff):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, x):
+        return -x * (x > 0)
+    
+    def dydx(self, output):
+        return -1 * np.array(output > 0, dtype=np.float32)
+
+
+'''
 Mean squared error loss
 '''
 class MSE(Diff):
@@ -234,16 +263,16 @@ class Neuron(Diff):
         self.prev = []
         self.valid_prev = []
 
-        self.weight = np.random.normal()
-        self.bias = 0
-        self.activation = ReLU()
+        self.weights = None
+        self.bias = None
+        self.activation = LeakyReLU()
     
     def initialize_weights(self):
         # np.random.seed(42) # optional deterministic weight initialization
         self.input_size = max(len(self.prev), 1)
         self.output_size = len(self.next)
         self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.1
-        self.bias = np.random.normal(self.output_size) * 0.1
+        self.bias = np.random.normal(size=self.input_size) * 0.01
 
         self.inputs = np.zeros(self.input_size)
         self.next_inputs = np.zeros(self.input_size)
@@ -309,7 +338,7 @@ class ContinuousNetwork():
         self.num_neurons = num_neurons
         self.num_input_neurons = num_input_neurons
         self.num_output_neurons = num_output_neurons
-        self.initialize_network(num_neurons, edge_probability)
+        self.initialize_network_fast(num_neurons, edge_probability)
         self.num_edges = np.sum(self.adjacency_matrix, dtype=np.int32)
         self.initialize_neuron_graph()
         self.optimizer = ADAM()
@@ -328,6 +357,68 @@ class ContinuousNetwork():
             'true': [],
             'output_grad': []
         }
+
+    '''
+    Initializes the network adjacency matrix and neuron positions [fast version]
+        
+    - Randomly assign node positions
+    - Locally assign connections in new adjacency matrix
+    - Apply graph rules to new adjacency matrix
+    '''
+    def initialize_network_fast(self, num_neurons, edge_probability):
+        debug_print(['Initializing network'])
+        def sort_by_x(neuron_positions):
+            # Sort the spatially arranged neurons by x position
+            sorted_neurons = sorted(neuron_positions.items(), key=lambda item: item[1][0])
+            sorted_list = [(index, position) for index, position in sorted_neurons]
+            return sorted_list
+        def sort_by_y(neuron_positions):
+            # Sort the spatially arranged neurons by x position
+            sorted_neurons = sorted(neuron_positions.items(), key=lambda item: item[1][1])
+            sorted_list = [(index, position) for index, position in sorted_neurons]
+            return sorted_list
+
+        def generate_postiional_adjacency_matrix(neuron_positions, prob):
+            num_neurons = len(neuron_positions)
+            adjacency_matrix = np.zeros((num_neurons, num_neurons))
+
+            rand = np.random.normal(size=(num_neurons, num_neurons))
+            for i in tqdm(range(num_neurons)):
+                for j in range(num_neurons):
+                    m_distance = np.abs(neuron_positions[i][0] - neuron_positions[j][0]) + np.abs(neuron_positions[i][1] - neuron_positions[j][1])
+                    
+                    connection_probability = prob - m_distance
+
+                    if rand[i][j] < connection_probability:
+                        adjacency_matrix[i][j] = 1
+            
+            return adjacency_matrix
+
+        neuron_positions = {i: [0, 0] for i in range(self.num_neurons)}
+        for i in range(self.num_neurons):
+            x, y = 1, 1
+            while x ** 2 + y ** 2 > 1:
+                x, y = np.random.random(2) * 2 - 1
+            neuron_positions[i] = [x, y]
+
+        self.neuron_positions = neuron_positions
+        sorted_adjacency_matrix_positions = sort_by_x(neuron_positions)
+        self.input_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[:self.num_input_neurons]]
+        # sorted_adjacency_matrix_positions = sort_by_y(neuron_positions)
+        i = self.num_input_neurons + self.num_neurons // 10
+        self.output_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[i:i+self.num_output_neurons]]
+
+        adjacency_matrix = generate_postiional_adjacency_matrix(neuron_positions, edge_probability)
+
+        # - Neurons can't connect to themselves
+        # - Input neurons can't recieve input
+        # - Output neurons can't output to other neurons (yet)
+        for i in range(num_neurons): adjacency_matrix[i, i] = False
+        for i in self.input_neuron_indices: adjacency_matrix[:, i] = False
+        for i in self.output_neuron_indices: adjacency_matrix[i, :] = False # Something to revisit
+
+        self.adjacency_matrix = adjacency_matrix
+
 
     '''
     Initializes the network adjacency matrix and neuron positions
@@ -409,6 +500,10 @@ class ContinuousNetwork():
 
         for neuron in self.input_neurons: neuron.prev.append(None)
         for neuron in self.output_neurons: neuron.next.append(None)
+        # for neuron in self.neurons:
+        #     # Add inhibitory neurons (control energy)
+        #     if np.random.random() < 0.4:
+        #         neuron.activation = NReLU()
         for neuron in self.output_neurons: neuron.activation = Linear()
 
         for neuron in neurons:
@@ -445,7 +540,7 @@ class ContinuousNetwork():
                 neuron.inputs = neuron.next_inputs
 
         for neuron in self.neurons:
-            neuron.outputs = neuron.activation(neuron.inputs @ neuron.weights) # * (1 - decay)
+            neuron.outputs = neuron.activation((neuron.inputs + neuron.bias) @ neuron.weights) # * (1 - decay)
             if neuron in self.output_neurons:
                 output_index = self.output_neurons.index(neuron)
                 network_output[output_index] = neuron.outputs
@@ -530,9 +625,10 @@ class ContinuousNetwork():
             dady = neuron.activation.dydx(neuron.outputs)
             dydx = neuron.weights
             dydw = neuron.inputs
+            dydb = neuron.weights
 
             dldw = np.outer(dydw, neuron.input_J * dady)
-            dldb = 0 # neuron.input_J * dady
+            dldb = dydb @ (neuron.input_J * dady)
 
             self.optimizer(neuron, [dldw, dldb])
 

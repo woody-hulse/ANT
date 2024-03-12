@@ -13,15 +13,16 @@ from continuous_network import *
 
 
 
-def visualize_episode(env, network, name):
+def visualize_episode(network, env, name):
     debug_print(['Visualizing episode'])
 
     state = env.reset()[0]
     image_frames = []
     max_steps_per_episode = env.spec.max_episode_steps
     
-    for step in tqdm(range(1000)):
-        action = network.forward_pass(state)
+    for step in tqdm(range(500)):
+        action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
+        # action = network.forward_pass(state)
         
         state, reward, done, _, _ = env.step(action)
         
@@ -38,8 +39,8 @@ def visualize_episode(env, network, name):
                         loop = 0,
                         append_images = image_frames[1:])
 
-    debug_print(['Creating gif'])
-    ip.display.Image(open('rl_results' + name + '.gif', 'rb').read())
+    # debug_print(['Creating gif'])
+    # ip.display.Image(open('rl_results/' + name + '.gif', 'rb').read())
 
 
 def watch_rl_episode(network, env):
@@ -65,18 +66,44 @@ def watch_rl_episode(network, env):
     cv2.destroyAllWindows()
     env.close()
 
+
+
+def tensorflow_train(layers, env, episodes=1000, time=500):
+    import tensorflow as tf
+
+    model = tf.keras.Sequential()
+    for layer in layers:
+        model.add(tf.keras.layers.Dense(layer, activation='relu'))
+    model.compile(loss='mse', optimizer='rmsprop')
+
+    class Model(tf.keras.Model):
+        def __init__(self, model):
+            super().__init__()
+
+            self.model = model
+        
+        def forward_pass(self, inputs):
+            return self.model(inputs)
+        
+        def backward_pass(self, outputs):
+            pass
+
+
+
 def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False):
     gamma = 0.99  # Discount factor for future rewards
 
     loss_fn = MSE()
 
     episode_rewards = []
-    episode_energies = []
-    episode_mean_energies = []
-    episode_utilizations = []
-    episode_mean_utilizations = []
-    episode_gradient_utilizations = []
-    episode_mean_gradient_utilizations = []
+
+    NETWORK_METRICS = ['energy', 'grad_energy', 'weight_energy', 'prop_input', 'prop_grad']
+    NETWORK_METRICS_LABELS = ['Energy', 'Gradient Energy', 'Weight Magnitude', 'Network Utilization', 'Gradient Utilization']
+    num_metrics = len(NETWORK_METRICS)
+    metrics = {}
+    for metric in NETWORK_METRICS:
+        metrics[metric] = ([], [])
+    
     best_t = 0
     for episode in range(episodes):
         state = env.reset()[0]
@@ -86,8 +113,9 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         total_reward = 0
         p_reward = 0
 
-        for i in range(15):
-            network.forward_pass(np.zeros_like(state))
+        warmup = 0
+        for i in range(warmup):
+            network.forward_pass(state * i / warmup)
 
         pbar = tqdm(range(time))
         for t in pbar:
@@ -99,7 +127,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             '''
             For pole cart: 
                 action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
-                y      = np.array([state[2]])
+                y      = np.array([state[2] + state[]])
                 y_hat  = np.array([0])
             otherwise:
                 action = network.forward_pass(state)
@@ -111,7 +139,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             G = reward + gamma * G
 
-            y      = np.array([state[2]])
+            y      = np.array([np.sum(state) + state[2] * 10])
             y_hat  = np.array([0])
             
             network.backward_pass(loss_fn, y, y_hat)
@@ -128,7 +156,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             state = next_state
 
-            if gif:
+            if gif and episode % 10 == 0:
                 plot_graph(network, title=f't{t}', save=True, save_directory='graph_images/')
 
             if t > best_t:
@@ -142,32 +170,22 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             if done: break
         
-        if gif:
+        if gif and episode % 10 == 0:
             convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
                         
-
-        episode_utilizations.append(network.metrics['prop_input'][-1])
-        episode_mean_utilizations.append(np.mean(network.metrics['prop_input']))
-        episode_gradient_utilizations.append(network.metrics['prop_grad'][-1])
-        episode_mean_gradient_utilizations.append(np.mean(network.metrics['prop_grad']))
-        episode_energies.append(network.metrics['energy'][-1])
-        episode_mean_energies.append(np.mean(network.metrics['energy']))
+        for metric in metrics.keys():
+            metrics[metric][0].append(network.metrics[metric][-1])
+            metrics[metric][1].append(np.mean(network.metrics[metric][-t:]))
         episode_rewards.append(total_reward)
 
     if plot:
-        fig, axes = plt.subplots(4, 1, gridspec_kw={'height_ratios': [1, 0.15, 0.15, 0.15]}, sharex=True)
+        fig, axes = plt.subplots(num_metrics + 1, 1, gridspec_kw={'height_ratios': [1] + [0.1 for _ in range(num_metrics)]}, sharex=True)
         axes[0].set_title('Rewards over episodes')
         axes[0].plot(episode_rewards, color='blue', label='Total Reward')
-        axes[1].plot(episode_energies, color='orange', label='Energy')
-        axes[1].plot(episode_mean_energies, color='green', label='Mean Energy')
-        axes[2].plot(episode_utilizations, color='purple', label='Network Utilization')
-        axes[2].plot(episode_mean_utilizations, color='red', label='Mean Network Utilization')
-        axes[3].plot(episode_gradient_utilizations, color='teal', label='Network Gradient Utilization')
-        axes[3].plot(episode_mean_gradient_utilizations, color='violet', label='Mean Network Gradient Utilization')
-        axes[0].legend()
-        axes[1].legend()
-        axes[2].legend()
-        axes[3].legend()
+        for i, ((metric, values), label) in enumerate(zip(metrics.items(), NETWORK_METRICS_LABELS)):
+            axes[i + 1].plot(metrics[metric][0], label=label)
+            axes[i + 1].plot(metrics[metric][1], label='Mean ' + label)
+            axes[i + 1].legend()
         plt.legend()
         plt.xlabel('Episode')
         plt.show()
@@ -188,24 +206,24 @@ def main():
     except: num_output_neurons = 1
 
     network = ContinuousNetwork(
-    num_neurons         = 128,
-    edge_probability    = 1.5,
+    num_neurons         = 8,
+    edge_probability    = 100,
     num_input_neurons   = env.observation_space.shape[0],
     num_output_neurons  = num_output_neurons
     )
-    # visualize_network(network)
+    # plot_graph(network)
     # visualize_network(network, show_weight=True)
 
     for neuron in network.output_neurons:
         neuron.activation = Sigmoid()
 
     network.print_info()
-    rmsprop = RMSProp(alpha=5e-6, beta=0.99, reg=0)
+    rmsprop = RMSProp(alpha=1e-5, beta=0.99, reg=2e-5)
     network.set_optimizer(rmsprop)
 
-    train(network, env, episodes=1000, render=False, plot=True, gif=False)
+    train(network, env, episodes=200, render=False, plot=True, gif=False)
     # watch_rl_episode(network, env)
-    # visualize_episode(env, network, name='prelim_rl_results')
+    visualize_episode(network, env, name='prelim_rl_results')
 
 
 if __name__ == '__main__':

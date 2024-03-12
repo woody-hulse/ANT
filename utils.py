@@ -74,8 +74,6 @@ def visualize_network(network, paths=[], show_weight=False):
                 G[i][next_i]['weight'] = 0.1
 
     nx.set_edge_attributes(G, edge_attributes)
-                
-    print(edge_attributes)
 
     max_weight = np.max([np.sum(neuron.weights) for neuron in network.neurons])
 
@@ -127,7 +125,7 @@ def plot_graph(network, title='', save=False, save_directory='graph_images/'):
     for edge in edges:
         J = network.neurons[edge[1]].inputs
         out_index = network.neurons[edge[1]].prev.index(network.neurons[edge[0]])
-        weight = np.sum(J[out_index])
+        weight = np.sum(np.abs(J[out_index]))
         G.add_edge(edge[0], edge[1], weight=weight)
     
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
