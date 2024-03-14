@@ -112,13 +112,16 @@ def plot_graph(network, title='', save=False, save_directory='graph_images/'):
     input_neuron_color = (0.1, 0.35, 0.95)
     output_neuron_color = (0.9, 0.7, 0.2)
     hidden_neuron_color = (0.2, 0.2, 0.2)
+    critic_neuron_color = (0.9, 0.2, 0.7)
     neuron_colors = [hidden_neuron_color for _ in range(len(G.nodes))]
     neuron_colors = [input_neuron_color if i in network.input_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
     neuron_colors = [output_neuron_color if i in network.output_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
+    neuron_colors = [critic_neuron_color if i in network.critic_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
 
     # Set neuron sizes
     neuron_sizes = [0 for _ in range(len(G.nodes))]
     neuron_sizes = [30 if i in network.input_neuron_indices + network.output_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
+    neuron_sizes = [20 if i in network.critic_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
     
     rows, cols = np.where(network.adjacency_matrix > 0)
     edges = zip(rows.tolist(), cols.tolist())
@@ -131,6 +134,14 @@ def plot_graph(network, title='', save=False, save_directory='graph_images/'):
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
     nx.draw(G, pos=network.neuron_positions, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=weights, width=1)
     
+    legend_elements = [
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input Neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=output_neuron_color, markersize=8, label='Output Neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=critic_neuron_color, markersize=6, label='Critic Neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=hidden_neuron_color, markersize=4, label='Hidden Neurons')]
+
+    plt.legend(handles=legend_elements, loc='upper right')
+
     plt.title(title)
     if save:
         plt.savefig(save_directory + title)
