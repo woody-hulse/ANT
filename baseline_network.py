@@ -1,4 +1,5 @@
 import tensorflow as tf
+from sklearn.preprocessing import StandardScaler
 from continuous_rl import *
 
 class ActorCritic(tf.keras.Model):
@@ -15,13 +16,13 @@ class ActorCritic(tf.keras.Model):
         mu = tf.keras.layers.Dense(self.action_size, activation='tanh')(hidden_2)
         sigma = tf.keras.layers.Dense(self.action_size, activation='sigmoid')(hidden_2)
         self.actor = tf.keras.Model(inputs=input, outputs=[mu, sigma])
-        self.actor.optimizer = tf.keras.optimizers.Adam()
+        self.actor.optimizer = tf.keras.optimizers.Adam(learning_rate=0.003)
 
         self.critic = tf.keras.Sequential()
         for _ in range(num_hidden):
             self.critic.add(tf.keras.layers.Dense(hidden_size, activation='selu'))
         self.critic.add(tf.keras.layers.Dense(1, activation='linear'))
-        self.critic.optimizer = tf.keras.optimizers.Adam()
+        self.critic.optimizer = tf.keras.optimizers.Adam(learning_rate=0.003)
 
     def act(self, state):
         mu, sigma = self.actor(state)
@@ -32,9 +33,22 @@ class ActorCritic(tf.keras.Model):
                                   self.env.action_space.high[0])
 
         return action, norm_dist, sigma
+
+    
+    def get_state_scale(self):
+        state_space_samples = np.array(
+            [self.env.observation_space.sample() for _ in range(10000)])
+        self.scaler = StandardScaler()
+        self.scaler.fit(state_space_samples)
+
+    def scale_state(self, state):
+        scaled = self.scaler.transform([state])
+        return scaled
     
 
     def train(self, episodes=1000, time=500, plot=True):
+        self.get_state_scale()
+
         gamma = 0.99
         epsilon = 1e-4
 
@@ -47,12 +61,12 @@ class ActorCritic(tf.keras.Model):
             pbar = tqdm(range(time))
             for t in pbar:
                 with tf.GradientTape(persistent=True) as tape:
-                    action, norm_dist, sigma = self.act(np.array([state]))
-                    value = self.critic(np.array([state]))
+                    action, norm_dist, sigma = self.act(self.scale_state(state))
+                    value = self.critic(self.scale_state(state))
                     next_state, reward, done, _, _ = self.env.step(np.squeeze(action, axis=0))
                     total_reward += reward
 
-                    value_next = self.critic(np.array([next_state]))
+                    value_next = self.critic(self.scale_state(state))
                     target = reward + gamma * np.squeeze(value_next)
                     td_error = target - np.squeeze(value)
 
