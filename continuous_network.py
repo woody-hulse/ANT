@@ -181,7 +181,7 @@ class ReLU(Diff):
 Leaky ReLU activation function
 '''
 class LeakyReLU(Diff):
-    def __init__(self, alpha=0.05):
+    def __init__(self, alpha=0.5):
         super().__init__()
         self.alpha = alpha
 
@@ -277,7 +277,7 @@ class Neuron(Diff):
 
         self.weights = None
         self.bias = None
-        self.activation = LeakyReLU()
+        self.activation = Tanh()
     
     def initialize_weights(self):
         # np.random.seed(42) # optional deterministic weight initialization
@@ -399,14 +399,11 @@ class ContinuousNetwork():
             num_neurons = len(neuron_positions)
             adjacency_matrix = np.zeros((num_neurons, num_neurons))
 
-            rand = np.random.normal(size=(num_neurons, num_neurons))
+            rand = np.random.uniform(0, 1, size=(num_neurons, num_neurons))
             for i in tqdm(range(num_neurons)):
                 for j in range(num_neurons):
-                    m_distance = np.abs(neuron_positions[i][0] - neuron_positions[j][0]) + np.abs(neuron_positions[i][1] - neuron_positions[j][1])
-                    
-                    connection_probability = prob - m_distance
-
-                    if rand[i][j] < connection_probability:
+                    distance = np.abs(neuron_positions[i][0] - neuron_positions[j][0]) + np.abs(neuron_positions[i][1] - neuron_positions[j][1])
+                    if rand[i][j] * prob > distance:
                         adjacency_matrix[i][j] = 1
             
             return adjacency_matrix
@@ -419,11 +416,28 @@ class ContinuousNetwork():
             neuron_positions[i] = [x, y]
 
         self.neuron_positions = neuron_positions
-        sorted_adjacency_matrix_positions = sort_by_x(neuron_positions)
-        self.input_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[:self.num_input_neurons]]
-        sorted_adjacency_matrix_positions = sort_by_y(neuron_positions)
-        self.output_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[:self.num_output_neurons]]
-        self.critic_neuron_indices = [i[0] for i in sorted_adjacency_matrix_positions[-self.num_critic_neurons:]]
+        allocated_neuron_indices = set()
+        x_sorted_adjacency_matrix_positions = sort_by_x(neuron_positions)
+        y_sorted_adjacency_matrix_positions = sort_by_y(neuron_positions)
+
+        self.input_neuron_indices = []
+        self.critic_neuron_indices = []
+        self.output_neuron_indices = []
+        for i, (x, y) in x_sorted_adjacency_matrix_positions:
+            if not i in allocated_neuron_indices:
+                self.input_neuron_indices.append(i)
+                allocated_neuron_indices.add(i)
+            if len(self.input_neuron_indices) >= self.num_input_neurons: break
+        for i, (x, y) in y_sorted_adjacency_matrix_positions:
+            if not i in allocated_neuron_indices:
+                self.critic_neuron_indices.append(i)
+                allocated_neuron_indices.add(i)
+            if len(self.critic_neuron_indices) >= self.num_critic_neurons: break
+        for i, (x, y) in x_sorted_adjacency_matrix_positions[::-1]:
+            if not i in allocated_neuron_indices:
+                self.output_neuron_indices.append(i) 
+                allocated_neuron_indices.add(i)
+            if len(self.output_neuron_indices) >= self.num_output_neurons: break
 
         adjacency_matrix = generate_postiional_adjacency_matrix(neuron_positions, edge_probability)
 
@@ -434,6 +448,14 @@ class ContinuousNetwork():
         for i in self.input_neuron_indices: adjacency_matrix[:, i] = False
         for i in self.output_neuron_indices: adjacency_matrix[i, :] = False # Something to revisit
         for i in self.critic_neuron_indices: adjacency_matrix[i, :] = False
+
+        # Issue graph warnings
+        for i in self.input_neuron_indices:
+            if (1 - adjacency_matrix[i, :]).all(): debug_print(['WARNING: disconencted input neuron'])
+        for i in self.critic_neuron_indices:
+            if (1 - adjacency_matrix[:, i]).all(): debug_print(['WARNING: disconencted critic neuron'])
+        for i in self.output_neuron_indices:
+            if (1 - adjacency_matrix[:, i]).all(): debug_print(['WARNING: disconencted output neuron'])
 
         self.adjacency_matrix = adjacency_matrix
 
@@ -504,7 +526,7 @@ class ContinuousNetwork():
                 neuron.inputs = neuron.next_inputs
 
         for neuron in self.neurons:
-            neuron.outputs = neuron.activation((neuron.inputs + neuron.bias) @ neuron.weights) # * (1 - decay)
+            neuron.outputs = neuron.activation((neuron.inputs) @ neuron.weights) # * (1 - decay)
             if neuron in self.output_neurons:
                 output_index = self.output_neurons.index(neuron)
                 network_output[output_index] = neuron.outputs
@@ -595,11 +617,11 @@ class ContinuousNetwork():
             dydb = neuron.weights
 
             dldw = np.outer(dydw, neuron.input_J * dady)
-            dldb = dydb @ (neuron.input_J * dady)
+            dldb = 0 # dydb @ (neuron.input_J * dady)
 
             self.optimizer(neuron, [dldw, dldb])
 
-            output_J = dydx @ (neuron.input_J * dady) # * (1 - decay) # signal dropoff
+            output_J = dydx @ (neuron.input_J * dady) * (1 - decay) # signal dropoff
 
             # Metrics
             if update_metrics: #and False: # disable for speed reasons
@@ -627,15 +649,16 @@ class ContinuousNetwork():
             self.metrics['prop_grad'].append(prop_grad)
 
     '''
-    Compute backward pass step given dL/dy
+    Compute backward pass step given dL/dy, dL/dc
     '''
-    def backward_pass_(self, dlda, dldc, decay=0, update_metrics=True):
+    def backward_pass_(self, dlda, dldc, decay=0, clip=None, update_metrics=True):
         # Metrics
         energy = 0
         grad_energy = 0
         weight_energy = 0
         prop_input = 0
         prop_grad = 0
+        grad_mean_square_mag = 0
 
         for i, neuron in enumerate(self.output_neurons):
             neuron.input_J = np.array([dlda[i]])
@@ -644,7 +667,7 @@ class ContinuousNetwork():
             neuron.input_J = np.array([dldc[i]])
 
         for neuron in self.neurons:
-            if not neuron in self.output_neurons:
+            if not neuron in self.output_neurons + self.critic_neurons:
                 neuron.input_J = neuron.next_input_J
 
         for neuron in self.neurons:
@@ -654,7 +677,7 @@ class ContinuousNetwork():
             dydb = neuron.weights
 
             dldw = np.outer(dydw, neuron.input_J * dady)
-            dldb = dydb @ (neuron.input_J * dady)
+            dldb = 0 # dydb @ (neuron.input_J * dady)
 
             self.optimizer(neuron, [dldw, dldb])
 
@@ -667,12 +690,22 @@ class ContinuousNetwork():
                 weight_energy += np.sum(np.abs(neuron.weights)) / self.num_neurons
                 prop_input += np.mean(neuron.inputs > 1e-7) / self.num_neurons
                 prop_grad += np.mean(neuron.input_J > 1e-7) / self.num_neurons
+            grad_mean_square_mag += np.sum(np.square(neuron.input_J)) / self.num_neurons
 
             if neuron in self.input_neurons:
                 continue
             for prev, prev_J in zip(neuron.prev, output_J):
                 input_index = prev.next.index(neuron)
                 prev.next_input_J[input_index] = prev_J
+
+        if clip:
+            # print(np.sqrt(grad_mean_square_mag))
+            if np.sqrt(grad_mean_square_mag) > clip:
+                # print('CLIP')
+                clip_factor = clip / np.sqrt(grad_mean_square_mag)
+                for neuron in self.neurons:
+                    neuron.next_input_J *= clip_factor
+
 
         if update_metrics:            
             self.metrics['energy'].append(energy)
@@ -710,8 +743,8 @@ class ContinuousNetwork():
     Calculates log probability of continuous action space
     '''
     def calculate_logprobs(self, mu, sigma, action):
-        a = - np.square(mu - action) / (2 * np.square(sigma) + self.epsilon)
-        b = - np.log(np.sqrt(2 * np.pi * np.square(sigma)))
+        a = -np.square(mu - action) / (2 * np.square(sigma) + self.epsilon)
+        b = -np.log(np.sqrt(2 * np.pi * np.square(sigma)))
         return a + b
 
     '''

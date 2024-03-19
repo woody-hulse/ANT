@@ -4,3 +4,15 @@ WARNING: Unknown warning type Time = 27.0500.
 Thu Feb 29 18:35:17 2024
 WARNING: Unknown warning type Time = 21.8000.
 
+Thu Mar 14 23:29:38 2024
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 0. The simulation is unstable. Time = 22.3500.
+
+Thu Mar 14 23:29:39 2024
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 0. The simulation is unstable. Time = 0.0000.
+
+Thu Mar 14 23:32:03 2024
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 0. The simulation is unstable. Time = 13.6500.
+
+Thu Mar 14 23:32:07 2024
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 0. The simulation is unstable. Time = 0.0000.
+

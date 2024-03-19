@@ -21,9 +21,8 @@ def visualize_episode(network, env, name):
     max_steps_per_episode = env.spec.max_episode_steps
     
     for step in tqdm(range(500)):
-        action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
-        # action = network.forward_pass(state)
-        
+        output = network.forward_pass(state) / 2
+        action = round(output[0] + 0.5)
         state, reward, done, _, _ = env.step(action)
         
         image_array = env.render()
@@ -38,80 +37,6 @@ def visualize_episode(network, env, name):
                         duration = 20,
                         loop = 0,
                         append_images = image_frames[1:])
-
-    # debug_print(['Creating gif'])
-    # ip.display.Image(open('rl_results/' + name + '.gif', 'rb').read())
-
-
-def watch_rl_episode(network, env):
-    state = env.reset()[0]
-    done = False
-    step = 0
-
-    while not done and step < 1000:
-        image = env.render()
-
-        cv2.imshow(f't={step}', image)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            cv2.destroyAllWindows()
-
-        action = network.forward_pass(state)
-        state, reward, done, _, _ = env.step(action)
-        # print(reward)
-        step += 1
-        if done:
-            print(f'Finished after {step} steps.')
-            break
-    
-    cv2.destroyAllWindows()
-    env.close()
-
-
-
-def tensorflow_train(layers, env, episodes=1000, time=500):
-    import tensorflow as tf
-
-    model = tf.keras.Sequential()
-    for layer in layers[:-1]:
-        model.add(tf.keras.layers.Dense(layer, activation='relu'))
-    model.add(tf.keras.layers.Dense(layer, activation='linear'))
-    model.compile(loss='mse', optimizer='rmsprop')
-    optimizer = tf.keras.optimizers.RMSprop(learning_rate=1e-5)
-
-    episode_rewards = []
-
-    for episode in range(episodes):
-        state = env.reset()[0]
-        total_reward = 0
-
-        pbar = tqdm(range(time))
-        for t in pbar:
-            with tf.GradientTape() as tape:
-                action = int(np.ceil(model(tf.constant([state]))[0][0] - 0.5))
-                next_state, reward, done, _, _ = env.step(action)
-
-                y      = np.array([np.sum(state) + state[2] * 10])
-                y_hat  = np.array([0])
-
-                total_reward += reward
-
-                loss = tf.keras.losses.mean_squared_error(y, y_hat)
-            
-            grads = tape.gradient(loss, model.trainable_variables)
-            optimizer.apply_gradients(zip(grads, model.trainable_variables))
-
-            if done:
-                break
-        
-        episode_rewards.append(total_reward)
-
-    fig, axes = plt.subplots(1, 1, sharex=True)
-    axes[0].set_title('ANN rewards over episodes')
-    axes[0].plot(episode_rewards, color='blue', label='Total Reward')
-    plt.legend()
-    plt.xlabel('Episode')
-    plt.show()
-
 
 
 def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False):
@@ -227,8 +152,8 @@ def main():
     except: num_output_neurons = 1
 
     network = ContinuousNetwork(
-    num_neurons         = 128,
-    edge_probability    = 0.9,
+    num_neurons         = 6,
+    edge_probability    = 100,
     num_input_neurons   = env.observation_space.shape[0],
     num_output_neurons  = num_output_neurons
     )
@@ -243,7 +168,6 @@ def main():
     network.set_optimizer(rmsprop)
 
     train(network, env, episodes=200, render=False, plot=True, gif=False)
-    # watch_rl_episode(network, env)
     visualize_episode(network, env, name='prelim_rl_results')
 
 

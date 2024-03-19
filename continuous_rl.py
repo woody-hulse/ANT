@@ -66,6 +66,10 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         total_reward = 0
         p_reward = 0
 
+        actor_losses = []
+        rewards = []
+        grads = []
+
         pbar = tqdm(range(time))
         for t in pbar:
             if render:
@@ -82,28 +86,35 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             next_state, reward, done, _, _ = env.step(action)
             reward = np.array([reward])
             pred_reward = network.value
-            pred_next_reward = network.get_next_value()
+            # pred_next_reward = network.get_next_value()
 
             # Compute loss
-            advantage = pred_reward - reward + gamma * pred_next_reward * (1 - int(done))
-            actor_loss = -advantage * network.calculate_logprobs(mu, sigma, action)
-            critic_loss = np.square(advantage) / 2
+            advantage = reward - pred_reward
+            actor_loss = -np.mean(advantage * network.calculate_logprobs(mu, sigma, action))
+            critic_loss = np.square(advantage)
             loss = np.mean(actor_loss) + np.mean(critic_loss)
 
             # print(actor_loss, critic_loss)
             
+            mean_var = np.mean(var)
             network.metrics['loss'].append(loss)
-            network.metrics['mean_var'].append(np.mean(var))
+            network.metrics['mean_var'].append(mean_var)
 
             # Compute derivatives
-            dlogpdmu = (action - mu) / (np.square(sigma) + network.epsilon)
-            dldmu = -advantage * dlogpdmu
-            dlds = np.square(action - mu) / (np.power(sigma, 3) + network.epsilon)
-            dldc = advantage
+            dlogpdmu = - (mu - action) / (np.square(sigma) + network.epsilon)
+            dldmu = - advantage * dlogpdmu
+            dlds = -advantage * (-np.square(mu - action) / (np.power(sigma, 3) + network.epsilon) - 1 / (np.pi * sigma + network.epsilon))
+            dldc = 2 * advantage
             dldy = np.concatenate([dldmu, dlds])
 
+            if not done:
+                actor_losses.append(np.sum(actor_loss))
+                rewards.append(reward[0])
+                grads.append(dldc)
+
             # Backward propagate
-            network.backward_pass_(dldy, dldc, decay=0, update_metrics=True)
+            network.backward_pass_(dldy, dldc, decay=0, clip=100, update_metrics=True)
+            # network.backward_pass(loss_fn, reward, pred_reward)
 
             '''
 
@@ -133,12 +144,10 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             '''
 
-            # print(mu, var, action, loss)
-
             max_chars = 160
             total_reward += np.sum(reward)
-            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(action) : 7.3f}; ' + \
-                network.get_metrics_string(metrics=['loss', 'energy', 'prop_input', 'prop_grad'])
+            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(action) : 7.3f}; convergence={mean_var : 7.3f}; ' + \
+                network.get_metrics_string(metrics=['loss', 'energy', 'grad_energy'])
             
             if len(pbar_string) > max_chars: pbar_string = pbar_string[:max_chars - 3] + '...'
 
@@ -168,6 +177,13 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             '''
             
             if done: break
+
+            # if t == time - 1: print(dlds, var)
+
+        # plt.plot(actor_losses)
+        # plt.plot(rewards)
+        # plt.plot(grads)
+        # plt.show()
 
         if gif:
             convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
@@ -199,7 +215,7 @@ def main():
     #   'Pendulum-v1'
     #   'MountainCarContinuous-v0'
     #   'BipedalWalker-v3'
-    #   'Ant-v2'
+    #   'Ant-v4'
     env = gym.make('BipedalWalker-v3', render_mode='rgb_array')
 
     try: num_output_neurons = env.action_space.shape[0] * 2
@@ -207,7 +223,7 @@ def main():
 
     network = ContinuousNetwork(
     num_neurons         = 256,
-    edge_probability    = 0.5,
+    edge_probability    = 1.5,
     num_input_neurons   = env.observation_space.shape[0],
     num_output_neurons  = num_output_neurons
     )
@@ -218,12 +234,14 @@ def main():
         neuron.activation = Tanh()
     for neuron in network.var_neurons:
         neuron.activation = Sigmoid()
+    for neuron in network.critic_neurons:
+        neuron.activation = Linear()
 
     network.print_info()
-    rmsprop = RMSProp(alpha=1e-5, beta=0.99, reg=3e-5)
+    rmsprop = RMSProp(alpha=4e-4, beta=0.99)
     network.set_optimizer(rmsprop)
 
-    train(network, env, episodes=100, render=True, plot=True, gif=True)
+    train(network, env, episodes=100, render=False, plot=True, gif=False)
     # watch_rl_episode(network, env)
     visualize_episode(network, env, name='prelim_rl_results')
 
