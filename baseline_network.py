@@ -11,18 +11,18 @@ class ActorCritic(tf.keras.Model):
         self.action_size = env.action_space.shape[0]
 
         input = tf.keras.layers.Input((self.observation_size,))
-        hidden_1 = tf.keras.layers.Dense(hidden_size, activation='selu')(input)
-        hidden_2 = tf.keras.layers.Dense(hidden_size, activation='selu')(hidden_1)
+        hidden_1 = tf.keras.layers.Dense(hidden_size, activation='sigmoid')(input)
+        hidden_2 = tf.keras.layers.Dense(hidden_size, activation='sigmoid')(hidden_1)
         mu = tf.keras.layers.Dense(self.action_size, activation='tanh')(hidden_2)
         sigma = tf.keras.layers.Dense(self.action_size, activation='sigmoid')(hidden_2)
         self.actor = tf.keras.Model(inputs=input, outputs=[mu, sigma])
-        self.actor.optimizer = tf.keras.optimizers.Adam(learning_rate=0.003)
+        self.actor.optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
 
         self.critic = tf.keras.Sequential()
         for _ in range(num_hidden):
-            self.critic.add(tf.keras.layers.Dense(hidden_size, activation='selu'))
+            self.critic.add(tf.keras.layers.Dense(hidden_size, activation='sigmoid'))
         self.critic.add(tf.keras.layers.Dense(1, activation='linear'))
-        self.critic.optimizer = tf.keras.optimizers.Adam(learning_rate=0.003)
+        self.critic.optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
 
     def act(self, state):
         mu, sigma = self.actor(state)
@@ -32,7 +32,7 @@ class ActorCritic(tf.keras.Model):
                                   self.env.action_space.low[0], 
                                   self.env.action_space.high[0])
 
-        return action, norm_dist, sigma
+        return action, norm_dist, sigma / 100
 
     
     def get_state_scale(self):
@@ -70,7 +70,7 @@ class ActorCritic(tf.keras.Model):
                     target = reward + gamma * np.squeeze(value_next)
                     td_error = target - np.squeeze(value)
 
-                    loss_actor = -tf.math.log(norm_dist.prob(action) + 1e-5) * td_error # + 1 / tf.math.sqrt(2 * np.pi * sigma) * epsilon
+                    loss_actor = -tf.math.log(norm_dist.prob(action) + 1e-5) * td_error + 1 / tf.math.sqrt(2 * np.pi * sigma) * epsilon
                     loss_critic = tf.keras.losses.MeanSquaredError()(value, np.array([target]))
 
                 grads_actor = tape.gradient(loss_actor, self.actor.trainable_variables)
@@ -83,13 +83,16 @@ class ActorCritic(tf.keras.Model):
                 mean = np.mean(action.numpy())
                 total_action += np.mean(np.abs(action.numpy()))
                 pbar_string = f'Episode {episode : 05}: total_reward={total_reward : 9.3f}; action={mean : 9.3f};' + \
-                   f' avg_action_mag={total_action / (t + 1) : 9.3f}; convergence={np.mean(sigma.numpy()) : 9.3f} '
+                   f' avg_action_mag={total_action / (t + 1) : 9.3f}; sigma={np.mean(sigma.numpy()) : 9.3f} '
                 pbar.set_description(pbar_string)
 
                 if done:
                     break
             
             total_rewards.append(total_reward)
+
+            # if episode % 10 == 0:
+            #     self.watch_episode(name=str(episode))
     
         if plot:
             plt.plot(total_rewards)
@@ -122,10 +125,10 @@ class ActorCritic(tf.keras.Model):
 
 
 def train():
-    env = gym.make('MountainCarContinuous-v0', render_mode='rgb_array')
+    env = gym.make('Pendulum-v1', render_mode='rgb_array')
     
-    model = ActorCritic(env, hidden_size=32, num_hidden=3)
-    model.train(episodes=800, time=512)
+    model = ActorCritic(env, hidden_size=16, num_hidden=2)
+    model.train(episodes=200, time=512)
     model.watch_episode()
 
 

@@ -9,7 +9,7 @@ sns.set_style(style='whitegrid',rc={'font.family': 'serif','font.serif':'Times'}
 
 from utils import *
 from continuous_network import *
-
+from environments import *
 
 
 def visualize_episode(network, env, name):
@@ -59,7 +59,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
     
     best_t = 0
     for episode in range(episodes):
-        state = env.reset()[0]
+        state = env.env.reset()[0]
 
         image_frames = []
         G = 0
@@ -73,17 +73,17 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         pbar = tqdm(range(time))
         for t in pbar:
             if render:
-                image_array = env.render()
+                image_array = env.env.render()
                 image_frame = Image.fromarray(image_array)
                 image_frames.append(image_frame)
 
             # Perform action
-            output = network.forward_pass(state)
-            split = len(output) // 2
-            mu, var = output[:split], output[split:]
-            sigma = np.sqrt(var)
-            action = [np.random.normal(m, s) for m, s in zip(mu, sigma)]
-            next_state, reward, done, _, _ = env.step(action)
+            next_state, reward, done, action_desc = env.act(network, state)
+            action = action_desc['action']
+            mu = action_desc['mu']
+            var = action_desc['var']
+            sigma = action_desc['sigma']
+
             reward = np.array([reward])
             pred_reward = network.value
             # pred_next_reward = network.get_next_value()
@@ -105,7 +105,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             dldmu = - advantage * dlogpdmu
             dlds = -advantage * (-np.square(mu - action) / (np.power(sigma, 3) + network.epsilon) - 1 / (np.pi * sigma + network.epsilon))
             dldc = 2 * advantage
-            dldy = np.concatenate([dldmu, dlds])
+            dldy = np.concatenate([dldmu, np.zeros_like(dlds)])
 
             if not done:
                 actor_losses.append(np.sum(actor_loss))
@@ -212,36 +212,26 @@ def main():
     # run internal mechansim until convergence
 
     # '*' indicates that model succeeds at this task
-    #   'Pendulum-v1'
-    #   'MountainCarContinuous-v0'
-    #   'BipedalWalker-v3'
-    #   'Ant-v4'
-    env = gym.make('BipedalWalker-v3', render_mode='rgb_array')
-
-    try: num_output_neurons = env.action_space.shape[0] * 2
-    except: num_output_neurons = 2
+    #   PENDULUM
+    #   MOUNTAINCAR_CONTINUOUS
+    #   BIPEDALWAKER
+    #   ANT
+    env = PARAMETRIC_BIPEDALWALKER
 
     network = ContinuousNetwork(
-    num_neurons         = 256,
-    edge_probability    = 1.5,
-    num_input_neurons   = env.observation_space.shape[0],
-    num_output_neurons  = num_output_neurons
+    num_neurons         = 64,
+    edge_probability    = 1.8,
+    num_input_neurons   = env.observation_space,
+    num_output_neurons  = env.action_space
     )
     # plot_graph(network)
     # visualize_network(network, show_weight=True)
 
-    for neuron in network.mu_neurons:
-        neuron.activation = Tanh()
-    for neuron in network.var_neurons:
-        neuron.activation = Sigmoid()
-    for neuron in network.critic_neurons:
-        neuron.activation = Linear()
-
     network.print_info()
-    rmsprop = RMSProp(alpha=4e-4, beta=0.99)
-    network.set_optimizer(rmsprop)
 
-    train(network, env, episodes=100, render=False, plot=True, gif=False)
+    env.configure_newtork(network)
+
+    train(network, env, episodes=300, render=True, plot=True, gif=False)
     # watch_rl_episode(network, env)
     visualize_episode(network, env, name='prelim_rl_results')
 

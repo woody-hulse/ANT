@@ -1,4 +1,4 @@
-from network import Network, MeanSquaredError
+from old.network import Network, MeanSquaredError
 
 from utils import *
 

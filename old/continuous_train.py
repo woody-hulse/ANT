@@ -1,7 +1,7 @@
 from continuous_network import ContinuousNetwork, MSE, SGD, ADAM, RMSProp
 
 from utils import *
-from datasets import *
+from old.datasets import *
 
 
 def train(network, X, Y, epochs=10):
