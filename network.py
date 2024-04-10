@@ -110,7 +110,7 @@ Contains:
     [Model]
     max_depth       : Maximum depth of backpropagation paths, defined in compilation
 '''
-class ContinuousNetwork():
+class Network():
     def __init__(self, num_neurons, edge_probability, num_input_neurons=8, num_output_neurons=8, num_critic_neurons=1, name='network'):
         self.name = name
         self.num_neurons = num_neurons

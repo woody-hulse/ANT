@@ -1,22 +1,9 @@
-import gym
-# import tensorflow as tf
-import copy
-import time
-import cv2
-from PIL import Image
-import IPython as ip
-import seaborn as sns
-sns.set_style(style='whitegrid',rc={'font.family': 'serif','font.serif':'Times'})
-
 from utils import *
 from network import *
-
-
+from environments import *
 
 def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False):
-    gamma = 0.99  # Discount factor for future rewards
-
-    loss_fn = MSE()
+    loss_function = MSE()
 
     episode_rewards = []
 
@@ -29,49 +16,31 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
     
     best_t = 0
     for episode in range(episodes):
-        state = env.reset()[0]
-
+        state = env.env.reset()[0]
         image_frames = []
-        G = 0
         total_reward = 0
-        p_reward = 0
+
+        actor_losses, rewards, grads = [], [], []
 
         pbar = tqdm(range(time))
         for t in pbar:
             if render:
-                image_array = env.render()
+                image_array = env.env.render()
                 image_frame = Image.fromarray(image_array)
                 image_frames.append(image_frame)
-
-            '''
-            For pole cart: 
-                action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
-                y      = np.array([state[2] + state[]])
-                y_hat  = np.array([0])
-            otherwise:
-                action = network.forward_pass(state)
-                y      = reward
-                y_hat  = G
-            '''
-            output = network.forward_pass(state) / 2
-            action = round(output[0] + 0.5)
-            next_state, reward, done, _, _ = env.step(action)
-
-            G = reward + gamma * G
-
-            y      = np.array([np.sum(state) + state[2] * 10])
-            y_hat  = np.array([0])
             
-            network.backward_pass(loss_fn, y, y_hat)
-            p_reward = reward
+            next_state, reward, done, action_desc = env.act(network, state)
+            output = action_desc['output']
+            action = action_desc['action']
+            minimizer = env.minimizer(*next_state)
+            dlda = 
+            network.backward_pass(loss_function, np.array([minimizer for _ in range(env.action_space)]), np.array([0 for _ in range(env.action_space)]))
 
             max_chars = 160
             total_reward += reward
             pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={np.sum(action) : 7.3f}; ' + \
-                network.get_metrics_string(metrics=['loss', 'energy', 'prop_input', 'prop_grad'])
-            
+            network.get_metrics_string(metrics=['loss', 'energy', 'prop_input', 'prop_grad'])
             if len(pbar_string) > max_chars: pbar_string = pbar_string[:max_chars - 3] + '...'
-
             pbar.set_description(pbar_string)
 
             state = next_state
@@ -89,7 +58,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
                             append_images = image_frames[1:])
 
             if done: break
-        
+            
         if gif and episode % 10 == 0:
             convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
                         
@@ -110,40 +79,22 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         plt.xlabel('Episode')
         plt.show()
 
-
 def main():
-    # run internal mechansim until convergence
-
-    # '*' indicates that model succeeds at this task
-    # * 'CartPole-v1'
-    #   'Pendulum-v1'
-    #   'MountainCarContinuous-v0'
-    #   'BipedalWalker-v3'
-    #   'Ant-v2'
-    env = gym.make('CartPole-v1', render_mode='rgb_array')
-
-    try: num_output_neurons = env.action_space.shape[0]
-    except: num_output_neurons = 1
+    env = CARTPOLE
 
     network = Network(
-    num_neurons         = 6,
-    edge_probability    = 100,
-    num_input_neurons   = env.observation_space.shape[0],
-    num_output_neurons  = num_output_neurons
+    num_neurons         = 64,
+    edge_probability    = 1.5,
+    num_input_neurons   = env.observation_space,
+    num_output_neurons  = env.action_space
     )
-    # plot_graph(network)
-    # visualize_network(network, show_weight=True)
-
-    for neuron in network.output_neurons:
-        neuron.activation = Tanh()
-
+    env.configure_newtork(network)
     network.print_info()
-    rmsprop = RMSProp(alpha=1e-5, beta=0.99, reg=2e-5)
-    network.set_optimizer(rmsprop)
 
-    train(network, env, episodes=200, render=False, plot=True, gif=False)
-    visualize_episode(network, env, name='prelim_rl_results')
+    train(network, env, episodes=1000, render=False, plot=True, gif=False)
 
 
 if __name__ == '__main__':
     main()
+
+

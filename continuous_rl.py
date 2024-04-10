@@ -8,39 +8,8 @@ import seaborn as sns
 sns.set_style(style='whitegrid',rc={'font.family': 'serif','font.serif':'Times'})
 
 from utils import *
-from continuous_network import *
+from network import *
 from environments import *
-
-
-def visualize_episode(network, env, name):
-    debug_print(['Visualizing episode'])
-
-    state = env.reset()[0]
-    image_frames = []
-    max_steps_per_episode = env.spec.max_episode_steps
-    
-    for step in tqdm(range(500)):
-        output = network.forward_pass(state)
-        split = len(output) // 2
-        mu, var = output[:split], output[split:]
-        sigma = np.sqrt(var)
-        action = [np.random.normal(m, s) for m, s in zip(mu, sigma)]
-        
-        state, reward, done, _, _ = env.step(action)
-        
-        image_array = env.render()
-        image_frame = Image.fromarray(image_array)
-        image_frames.append(image_frame)
-        
-        if done:
-            break
-
-    image_frames[0].save(name + '.gif', 
-                        save_all = True, 
-                        duration = 20,
-                        loop = 0,
-                        append_images = image_frames[1:])
-    
 
 def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False):
     gamma = 0.99  # Discount factor for future rewards
@@ -216,9 +185,9 @@ def main():
     #   MOUNTAINCAR_CONTINUOUS
     #   BIPEDALWAKER
     #   ANT
-    env = PARAMETRIC_BIPEDALWALKER
+    env = PENDULUM# PARAMETRIC_BIPEDALWALKER
 
-    network = ContinuousNetwork(
+    network = Network(
     num_neurons         = 64,
     edge_probability    = 1.8,
     num_input_neurons   = env.observation_space,
@@ -231,7 +200,7 @@ def main():
 
     env.configure_newtork(network)
 
-    train(network, env, episodes=300, render=True, plot=True, gif=False)
+    train(network, env, episodes=300, render=False, plot=True, gif=False)
     # watch_rl_episode(network, env)
     visualize_episode(network, env, name='prelim_rl_results')
 

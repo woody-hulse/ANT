@@ -98,3 +98,19 @@ class NReLU(Diff):
     
     def dydx(self, output):
         return -1 * np.array(output > 0, dtype=np.float32)
+    
+
+'''
+Softmax activation function
+'''
+class Softmax(Diff):
+    def __init__(self):
+        super().__init__()
+    
+    def __call__(self, x):
+        e_x = np.exp(x - np.max(x))
+        return e_x / e_x.sum(axis=0)
+    
+    def dydx(self, output):
+        s = output.reshape(-1, 1)
+        return np.diagflat(s) - np.dot(s, s.T)

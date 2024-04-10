@@ -10,18 +10,23 @@ from core.optimizers import *
 from core.losses import *
 
 class Environment():
-    def __init__(self, env, continuous, mu_var=False):
+    def __init__(self, env, continuous, mu_var=False, num_actions=1, minimizer=None):
 
         self.env = env
         self.observation_space = env.observation_space.shape[0]
-        if mu_var: self.action_space = env.action_space.shape[0] * 2
-        else: self.action_space = env.action_space.shape[0]
+        if continuous:
+            if mu_var: self.action_space = env.action_space.shape[0] * 2
+            else: self.action_space = env.action_space.shape[0]
+        else:
+            self.action_space = num_actions
         self.continuous = continuous
         self.mu_var = mu_var
+        self.minimizer = minimizer
 
         # defaults
         self.neuron_activation = LeakyReLU()
-        self.output_activation = Sigmoid()
+        if continuous: self.output_activation = Sigmoid()
+        else: self.output_activation = Linear()
         self.mu_activation = Tanh()
         self.var_activation = Sigmoid()
         self.critic_activation = Linear()
@@ -30,32 +35,44 @@ class Environment():
 
         self.parametrization = None
 
+    def discretize_output(self, action):
+        cutoffs = np.array([(i + 1) / self.num_actions for i in range(self.num_actions)])
+        for i, cutoff in enumerate(cutoffs):
+            if action <= cutoff: return i
+        return -1
+    
+    def get_class_output(self, action):
+        return np.argmax(action)
+    
+    def get_probabilisitc_class_output(self, action):
+        return np.random.choice(action, size=1)
+
     def configure_newtork(self, network):
         if self.mu_var:
-            for neuron in network.mu_neurons:
-                neuron.activation = self.mu_activation
-            for neuron in network.var_neurons:
-                neuron.activation = self.var_activation
+            for neuron in network.mu_neurons: neuron.activation = self.mu_activation
+            for neuron in network.var_neurons: neuron.activation = self.var_activation
         else:
-            for neuron in network.output_neurons:
-                neuron.activation = self.output_activation
+            for neuron in network.output_neurons: neuron.activation = self.output_activation
 
-        for neuron in network.critic_neurons:
-            neuron.activation = self.critic_activation
+        for neuron in network.critic_neurons: neuron.activation = self.critic_activation
 
         network.set_optimizer(self.optimizer)
 
     def act(self, network, state):
-        action = network.forward_pass(state)
+        output = network.forward_pass(state)
         action_desc = {}
+        action_desc['output'] = output
 
         if self.mu_var:
-            split = action.shape[0] // 2
-            mu, var = action[:split], action[split:]
+            split = output.shape[0] // 2
+            mu, var = output[:split], output[split:]
             sigma = np.sqrt(var)
             action = [np.random.normal(m, s) for m, s in zip(mu, sigma)]
+            if not self.continuous: action = int(np.array(output) > 0)
             action_desc = {'mu': mu, 'var': var, 'sigma': sigma}
-        
+        elif not self.continuous: 
+            softmax = Softmax()(output)
+            action = self.get_class_output(softmax)
         action_desc['action'] = action
 
         if not self.parametrization is None:
@@ -65,11 +82,13 @@ class Environment():
         
         return next_state, reward, done, action_desc
 
+cartpole = gym.make('CartPole-v1', render_mode='rgb_array')
 pendulum = gym.make('Pendulum-v1', render_mode='rgb_array')
 mountaincar_continuous = gym.make('MountainCarContinuous-v0', render_mode='rgb_array')
 bipedalwalker = gym.make('BipedalWalker-v3', render_mode='rgb_array')
 ant = gym.make('Ant-v4', render_mode='rgb_array')
 
+CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2)
 PENDULUM = Environment(pendulum, continuous=True, mu_var=True)
 MOUNTAINCAR_CONTINUOUS = Environment(mountaincar_continuous, continuous=True, mu_var=True)
 BIPEDALWALKER = Environment(bipedalwalker, continuous=True, mu_var=True)
@@ -78,6 +97,10 @@ ANT = Environment(ant, continuous=True, mu_var=True)
 '''
 Make environment-specific changes here
 '''
+
+
+def tilt_minimizer(o0, o1, o2, o3): return o1
+CARTPOLE.minimizer = tilt_minimizer
 
 
 def bipedalwalker_parametrization(t1, t2):

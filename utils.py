@@ -3,6 +3,7 @@ import datetime
 import networkx as nx
 import matplotlib
 import matplotlib.pyplot as plt
+from PIL import Image
 import numpy as np
 from tqdm import tqdm
 import os
@@ -173,3 +174,29 @@ def convert_files_to_gif(directory, name):
 
 def arr(array):
     return np.array(array)
+
+
+def visualize_episode(network, env, name):
+    debug_print(['Visualizing episode'])
+
+    state = env.reset()[0]
+    image_frames = []
+    max_steps_per_episode = env.spec.max_episode_steps
+    
+    for step in tqdm(range(500)):
+        output = network.forward_pass(state) / 2
+        action = round(output[0] + 0.5)
+        state, reward, done, _, _ = env.step(action)
+        
+        image_array = env.render()
+        image_frame = Image.fromarray(image_array)
+        image_frames.append(image_frame)
+        
+        if done:
+            break
+
+    image_frames[0].save(name + '.gif', 
+                        save_all = True, 
+                        duration = 20,
+                        loop = 0,
+                        append_images = image_frames[1:])
