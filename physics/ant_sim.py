@@ -31,7 +31,18 @@ def observe_state(model, data):
 
     print('JOINT ANGLES')
     print(joint_angles)
-    
+
+    limb_joint_angles = []
+
+    # Extract joint angles for each limb
+    for limb in ["front_right", "front_left", "rear_right", "rear_left"]:
+        shoulder_joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, limb + "_shoulder")
+        elbow_joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, limb + "_elbow")
+        limb_joint_angles.append(data.qpos[shoulder_joint_id-1])
+        limb_joint_angles.append(data.qpos[elbow_joint_id-1])
+
+    print("limb joint angles", limb_joint_angles)
+
     # Body orientation
     if model.nq > 3:  # Assuming the orientation is represented by a quaternion
         root_quat = data.qpos[3:7]  # Assuming the root's orientation is stored here
@@ -48,7 +59,7 @@ def observe_state(model, data):
     print('BODY POSITION')
     print(body_position)
     
-    return np.concatenate([joint_angles, root_orientation_euler, body_position])
+    return np.concatenate([limb_joint_angles, root_orientation_euler, body_position])
 
 def quat_to_euler(quat):
     """
@@ -91,7 +102,10 @@ def run_simulation(model, data):
     cam.elevation = -30
     cam.distance = 5
 
-    while not glfw.window_should_close(window):
+    count = 0
+    while count < 4:
+        count += 1
+    # while not glfw.window_should_close(window):
         # Apply simple limb movement
         simple_limb_movement_controller(model, data)
         print(observe_state(model, data))
@@ -110,7 +124,7 @@ def run_simulation(model, data):
         glfw.swap_buffers(window)
         glfw.poll_events()
 
-    glfw.terminate()
+    # glfw.terminate()
 
 if __name__ == "__main__":
     model, data = init_simulation(xml_path)
