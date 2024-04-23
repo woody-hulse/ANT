@@ -27,6 +27,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         metrics[metric] = ([], [])
     
     best_t = 0
+    cl = []
     for episode in range(episodes):
         state = env.env.reset()[0]
 
@@ -62,6 +63,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             actor_loss = -np.mean(advantage * network.calculate_logprobs(mu, sigma, action))
             critic_loss = np.square(advantage)
             loss = np.mean(actor_loss) + np.mean(critic_loss)
+            cl.append(actor_loss)
 
             # print(actor_loss, critic_loss)
             
@@ -71,7 +73,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             # Compute derivatives
             dlogpdmu = - (mu - action) / (np.square(sigma) + network.epsilon)
-            dldmu = - advantage * dlogpdmu
+            dldmu = -advantage * dlogpdmu
             dlds = -advantage * (-np.square(mu - action) / (np.power(sigma, 3) + network.epsilon) - 1 / (np.pi * sigma + network.epsilon))
             dldc = 2 * advantage
             dldy = np.concatenate([dldmu, np.zeros_like(dlds)])
@@ -82,7 +84,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
                 grads.append(dldc)
 
             # Backward propagate
-            network.backward_pass_(dldy, dldc, decay=0, clip=100, update_metrics=True)
+            network.backward_(dldy, dldc, decay=0, clip=100, update_metrics=True)
             # network.backward_pass(loss_fn, reward, pred_reward)
 
             '''
@@ -153,6 +155,9 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         # plt.plot(rewards)
         # plt.plot(grads)
         # plt.show()
+            
+        plt.plot(cl)
+        plt.show()
 
         if gif:
             convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
@@ -185,11 +190,11 @@ def main():
     #   MOUNTAINCAR_CONTINUOUS
     #   BIPEDALWAKER
     #   ANT
-    env = PENDULUM# PARAMETRIC_BIPEDALWALKER
+    env = MOUNTAINCAR_CONTINUOUS# PARAMETRIC_BIPEDALWALKER
 
     network = Network(
-    num_neurons         = 64,
-    edge_probability    = 1.8,
+    num_neurons         = 32,
+    edge_probability    = 6,
     num_input_neurons   = env.observation_space,
     num_output_neurons  = env.action_space
     )

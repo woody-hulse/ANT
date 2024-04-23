@@ -100,3 +100,9 @@ def bits(time, n=2):
     X = [arr([np.random.randint(0, 2), np.random.randint(0, 2)]) for t in range(time + 1)]
     Y = [sum(X[t + 1]) for t in range(time + 1)]
     return X[1:], Y[:-1]
+
+
+def binary(time):
+    X = np.array([[1] for _ in range(time)])
+    Y = np.array([[t % 2] for t in range(time)])
+    return X, Y

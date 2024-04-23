@@ -2,6 +2,70 @@ import tensorflow as tf
 from sklearn.preprocessing import StandardScaler
 from continuous_rl import *
 
+
+class Actor(tf.keras.Model):
+    def __init__(self, env, hidden_size=32, num_hidden=3):
+        super().__init__()
+
+        self.dense_layers = tf.keras.Sequential([tf.keras.layers.Dense(hidden_size, activation='sigmoid') for _ in range(num_hidden)] \
+                                                + [tf.keras.layers.Dense(env.action_space, activation='linear')])
+        self.softmax_layer = tf.keras.activations.Softmax()
+        
+        self.env = env
+    
+    def __call__(self, x):
+        for layer in self.dense_layers:
+            x = layer(x)
+        return x
+
+    def train(self, episodes, time=512):
+        for episode in range(episodes):
+            state = self.env.env.reset()[0]
+
+            total_reward = 0
+            saved_log_probs = []
+            rewards = []
+
+            pbar = tqdm(range(time))
+            for t in pbar:
+                logits = self(state)
+                probs = self.softmax_layer(logits)
+                action = tf.random.categorical(logits, num_samples=1)
+
+                soft = tf.math.reduce_sum(tf.math.exp(logits))
+                logprobs = logits[action] - tf.math.log(soft)
+
+                saved_log_probs.append(logprobs)
+                state, reward, done, _, _ = self.env.env.step(action)
+                rewards.append(reward)
+                total_reward += reward
+        
+            # REINFORCE Update
+            policy_loss = []
+            returns = []
+            G = 0
+            for r in reversed(rewards):
+                G = r + self.env.gamma * G
+                returns.insert(0, G)
+            '''
+            r = mg.tensor(returns)
+            returns = (r - np.mean(r)) / (np.std(r) + 1e-9)  # Normalize returns
+
+            for log_prob, Gt in zip(saved_log_probs, returns):
+                policy_loss.append(-log_prob * Gt)  # Negative for gradient ascent
+        
+            returns.backward()
+            grad = np.array([np.mean(r.grad, axis=0) for _ in range(env.action_space)])
+
+            network.backward_(-grad, np.array([0]))
+
+            # print(grad.shape, grad)
+            '''
+            print(f'Episode {episode} Total Reward: {total_reward}')
+        
+        
+
+
 class ActorCritic(tf.keras.Model):
     def __init__(self, env, hidden_size=32, num_hidden=3):
         super().__init__()

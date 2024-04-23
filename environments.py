@@ -24,16 +24,18 @@ class Environment():
         self.minimizer = minimizer
 
         # defaults
-        self.neuron_activation = LeakyReLU()
+        self.neuron_activation = Sigmoid()
         if continuous: self.output_activation = Sigmoid()
         else: self.output_activation = Linear()
         self.mu_activation = Tanh()
         self.var_activation = Sigmoid()
         self.critic_activation = Linear()
 
-        self.optimizer = RMSProp(alpha=4e-4, beta=0.99)
+        self.optimizer = ADAM(alpha=1e-6, beta1=0.9, beta2=0.9)
+        # self.optimizer = RMSProp(alpha=1e-7, beta=0.99)
 
         self.parametrization = None
+        self.gamma = 0.99
 
     def discretize_output(self, action):
         cutoffs = np.array([(i + 1) / self.num_actions for i in range(self.num_actions)])
@@ -56,7 +58,7 @@ class Environment():
 
         for neuron in network.critic_neurons: neuron.activation = self.critic_activation
 
-        network.set_optimizer(self.optimizer)
+        network.optimizer = self.optimizer
 
     def act(self, network, state):
         output = network.forward_pass(state)
@@ -65,12 +67,13 @@ class Environment():
 
         if self.mu_var:
             split = output.shape[0] // 2
-            mu, var = output[:split], output[split:]
+            mu, var = output[:split], output[split:] / 6
             sigma = np.sqrt(var)
             action = [np.random.normal(m, s) for m, s in zip(mu, sigma)]
             if not self.continuous: action = int(np.array(output) > 0)
             action_desc = {'mu': mu, 'var': var, 'sigma': sigma}
         elif not self.continuous: 
+            # print(output)
             softmax = Softmax()(output)
             action = self.get_class_output(softmax)
         action_desc['action'] = action
@@ -84,12 +87,16 @@ class Environment():
 
 cartpole = gym.make('CartPole-v1', render_mode='rgb_array')
 pendulum = gym.make('Pendulum-v1', render_mode='rgb_array')
+mountaincar = gym.make('MountainCar-v0', render_mode='rgb_array')
+lunarlander = gym.make('LunarLander-v2', render_mode='rgb_array')
 mountaincar_continuous = gym.make('MountainCarContinuous-v0', render_mode='rgb_array')
 bipedalwalker = gym.make('BipedalWalker-v3', render_mode='rgb_array')
 ant = gym.make('Ant-v4', render_mode='rgb_array')
 
 CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2)
 PENDULUM = Environment(pendulum, continuous=True, mu_var=True)
+LUNARLANDER = Environment(lunarlander, continuous=False, mu_var=False, num_actions=4)
+MOUNTAINCAR = Environment(mountaincar, continuous=False, mu_var=False, num_actions=3)
 MOUNTAINCAR_CONTINUOUS = Environment(mountaincar_continuous, continuous=True, mu_var=True)
 BIPEDALWALKER = Environment(bipedalwalker, continuous=True, mu_var=True)
 ANT = Environment(ant, continuous=True, mu_var=True)
@@ -99,8 +106,12 @@ Make environment-specific changes here
 '''
 
 
-def tilt_minimizer(o0, o1, o2, o3): return o1
+def tilt_minimizer(o0, o1, a, o3): return np.abs(a)
 CARTPOLE.minimizer = tilt_minimizer
+
+def lander_minimizer(x, y, vx, vy, a, va, l, r):
+    return np.abs(vx) + np.abs(vy) + np.abs(a) + np.abs(va)
+LUNARLANDER.minimizer = lander_minimizer
 
 
 def bipedalwalker_parametrization(t1, t2):

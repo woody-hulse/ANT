@@ -103,43 +103,58 @@ def visualize_network(network, paths=[], show_weight=False):
     plt.show()
 
 
-def plot_graph(network, title='', save=False, save_directory='graph_images/'):
+def moving_average(a, n=3):
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
+
+def weight_function(network, edge):
+    weights = network.neurons[edge[1]].weights
+    out_index = network.neurons[edge[1]].prev.index(network.neurons[edge[0]])
+    weight = np.sum(np.abs(weights[out_index]))
+    return weight
+
+def plot_graph(network, title='', spring=False, save=False, save_directory='graph_images/'):
     G = nx.Graph()
 
     for i, node in enumerate(network.neurons):
         G.add_node(i)
 
     # Set neuron colors
-    input_neuron_color = (0.1, 0.35, 0.95)
-    output_neuron_color = (0.9, 0.7, 0.2)
-    hidden_neuron_color = (0.2, 0.2, 0.2)
+    input_neuron_color = '#a3ffb2'
+    output_neuron_color = '#ffeba3'
+    hidden_neuron_color = (0.4, 0.4, 0.4)
     critic_neuron_color = (0.9, 0.2, 0.7)
     neuron_colors = [hidden_neuron_color for _ in range(len(G.nodes))]
     neuron_colors = [input_neuron_color if i in network.input_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
     neuron_colors = [output_neuron_color if i in network.output_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
-    neuron_colors = [critic_neuron_color if i in network.critic_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
+    # neuron_colors = [critic_neuron_color if i in network.critic_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
 
     # Set neuron sizes
-    neuron_sizes = [0 for _ in range(len(G.nodes))]
-    neuron_sizes = [30 if i in network.input_neuron_indices + network.output_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
-    neuron_sizes = [20 if i in network.critic_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
+    neuron_sizes = [3 for _ in range(len(G.nodes))]
+    neuron_sizes = [15 if i in network.input_neuron_indices + network.output_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
+    neuron_sizes = [3 if i in network.critic_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
     
     rows, cols = np.where(network.adjacency_matrix > 0)
-    edges = zip(rows.tolist(), cols.tolist())
-    for edge in edges:
-        J = network.neurons[edge[1]].inputs
-        out_index = network.neurons[edge[1]].prev.index(network.neurons[edge[0]])
-        weight = np.sum(np.abs(J[out_index]))
-        G.add_edge(edge[0], edge[1], weight=weight)
+    weights = np.zeros(len(rows.tolist()))
+    for i, edge in enumerate(zip(rows.tolist(), cols.tolist())):
+        weights[i] = weight_function(network, edge)
+    weights /= np.max(weights) + 1e-5
+    # print([(a, b) for a, b in edges])
+    for i, edge in enumerate(zip(rows.tolist(), cols.tolist())):
+        G.add_edge(edge[0], edge[1], weight=weights[i])
     
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
-    nx.draw(G, pos=network.neuron_positions, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=weights, width=1)
+
+    if spring: pos = nx.spring_layout(G)
+    else: pos = network.neuron_positions
+    nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color='#b6b6b6', width=weights)
     
     legend_elements = [
-        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input Neurons'),
-        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=output_neuron_color, markersize=8, label='Output Neurons'),
-        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=critic_neuron_color, markersize=6, label='Critic Neurons'),
-        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=hidden_neuron_color, markersize=4, label='Hidden Neurons')]
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=output_neuron_color, markersize=8, label='Output neurons'),
+        # matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=critic_neuron_color, markersize=6, label='Critic Neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=hidden_neuron_color, markersize=4, label='Hidden neurons')]
 
     plt.legend(handles=legend_elements, loc='upper right')
 
@@ -176,24 +191,22 @@ def arr(array):
     return np.array(array)
 
 
-def visualize_episode(network, env, name):
-    debug_print(['Visualizing episode'])
+def visualize_episode(network, env, name, time=500):
+    # debug_print(['Visualizing episode'])
 
     state = env.reset()[0]
+
     image_frames = []
-    max_steps_per_episode = env.spec.max_episode_steps
-    
-    for step in tqdm(range(500)):
-        output = network.forward_pass(state) / 2
-        action = round(output[0] + 0.5)
-        state, reward, done, _, _ = env.step(action)
+    for t in tqdm(range(time)):
+        logits = network.forward(state)
+        action = np.argmax(logits)
+        state, reward, done, _, _ = env.env.step(action)
         
         image_array = env.render()
         image_frame = Image.fromarray(image_array)
         image_frames.append(image_frame)
         
-        if done:
-            break
+        if done: break
 
     image_frames[0].save(name + '.gif', 
                         save_all = True, 

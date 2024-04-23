@@ -1,3 +1,5 @@
+import mygrad as mg
+
 from utils import *
 from network import *
 from environments import *
@@ -28,13 +30,30 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
                 image_array = env.env.render()
                 image_frame = Image.fromarray(image_array)
                 image_frames.append(image_frame)
-            
+
+            output = mg.tensor(network.forward(state))
+            softmax = Softmax()(output)
+            action = np.argmax(softmax)
+            next_state, reward, done, _, _ = env.env.step(action)
+            network.metrics['loss'].append(env.minimizer(*next_state))
+            minimizer = mg.tensor(env.minimizer(*next_state))
+            loss = MSE()(minimizer, 0)
+            loss.backward()
+            network.backward_(np.array([minimizer.grad for _ in range(env.action_space)]), np.array([0]))
+
+            '''
             next_state, reward, done, action_desc = env.act(network, state)
             output = action_desc['output']
             action = action_desc['action']
             minimizer = env.minimizer(*next_state)
-            dlda = 
-            network.backward_pass(loss_function, np.array([minimizer for _ in range(env.action_space)]), np.array([0 for _ in range(env.action_space)]))
+            network.metrics['loss'].append(minimizer)
+            dlda1 = MSE().dydx(np.array([0 for _ in range(env.action_space)]), np.array([minimizer for _ in range(env.action_space)]))
+            dlda2 = Softmax().dydx(dlda1) #  + np.fmin(4, np.fmax(-4, np.mean(1 / (output * np.abs(output) + 1e-2))))
+            # print(np.mean(1 / (output * np.abs(output) + 1e-2)))
+            # print(dlda2.shape, dlda1.shape)
+            # print(output)
+            network.backward_pass_(dlda1, np.array([0]))
+            '''
 
             max_chars = 160
             total_reward += reward

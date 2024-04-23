@@ -45,24 +45,24 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             '''
             For pole cart: 
-                action = int(np.ceil(network.forward_pass(state)[0] - 0.5))
+                action = int(np.ceil(network.forward(state)[0] - 0.5))
                 y      = np.array([state[2] + state[]])
                 y_hat  = np.array([0])
             otherwise:
-                action = network.forward_pass(state)
+                action = network.forward(state)
                 y      = reward
                 y_hat  = G
             '''
-            output = network.forward_pass(state) / 2
+            output = network.forward(state) / 2
             action = round(output[0] + 0.5)
             next_state, reward, done, _, _ = env.step(action)
 
             G = reward + gamma * G
 
-            y      = np.array([np.sum(state) + state[2] * 10])
+            y      = np.array([state[2]])
             y_hat  = np.array([0])
             
-            network.backward_pass(loss_fn, y, y_hat)
+            network.backward(loss_fn, y, y_hat)
             p_reward = reward
 
             max_chars = 160
@@ -90,8 +90,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             if done: break
         
-        if gif and episode % 10 == 0:
-            convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
+        
                         
         for metric in metrics.keys():
             metrics[metric][0].append(network.metrics[metric][-1])

@@ -5,7 +5,7 @@ from .core import Diff
 ADAM optimizer
 '''
 class ADAM():
-    def __init__(self, alpha=0.01, beta1=0.9, beta2=0.9, reg=0.01, epsilon=1e-7):
+    def __init__(self, alpha=0.001, beta1=0.9, beta2=0.9, reg=0.0, epsilon=1e-7):
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
@@ -45,7 +45,7 @@ class ADAM():
 RMSProp optimizer
 '''
 class RMSProp():
-    def __init__(self, alpha=0.01, beta=0.9, reg=0.01, epsilon=1e-7):
+    def __init__(self, alpha=0.001, beta=0.9, reg=0.0, epsilon=1e-7):
         self.alpha = alpha
         self.beta = beta
         self.reg = reg
