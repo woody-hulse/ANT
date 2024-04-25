@@ -16,8 +16,7 @@ def compute_discounted_gradients(gradients, rewards, gamma=0.99):
         discounted_gradients += gradients[t] * rewards[t] * np.power(gamma, T - t)
     return discounted_gradients
 
-def simulate_episode(network_env, train=TRAIN, time=500):
-    network, env = network_env
+def simulate_episode(network, env, train=TRAIN, time=500):
     state = env.env.reset()[0]
     total_reward = 0
     rewards = []
@@ -41,7 +40,7 @@ def simulate_episode(network_env, train=TRAIN, time=500):
     return total_reward, network
 
 
-def test_network(network, env, episodes=1, train=TRAIN, time=500):
+def test_network(network, env, episodes=1, train=False, time=500):
     total_rewards = np.zeros(episodes)
     for e in range(episodes):
         state = env.env.reset()[0]
@@ -61,7 +60,7 @@ def test_network(network, env, episodes=1, train=TRAIN, time=500):
                 grad = np.eye(env.env.action_space.n)[action] - probs
                 gradients.append(grad)
                 discounted_gradients = compute_discounted_gradients(gradients, rewards, gamma=0.99)
-                # network.backward_(discounted_gradients, np.array([0]), clip=10, update_metrics=False, t=t)
+                network.backward_(discounted_gradients, np.array([0]), clip=10, update_metrics=False, t=t)
             
             if done: break
 
@@ -69,7 +68,12 @@ def test_network(network, env, episodes=1, train=TRAIN, time=500):
     return np.mean(total_rewards)
 
 
-def evolve(network, env, episodes=1000, mutations=1000, graph=False, render=False, plot=True):
+def mutate(network, args):
+    network.mutate(**args)
+    return network
+
+
+def evolve(network, env, mutation_args, episodes=1000, mutations=1000, graph=False, render=False, plot=True, multiprocess=True):
 
     train_rewards = []
     test_rewards = []
@@ -77,48 +81,49 @@ def evolve(network, env, episodes=1000, mutations=1000, graph=False, render=Fals
     NETWORK_METRICS_LABELS = ['Energy', 'Gradient Energy', 'Weight Magnitude', 'Network Utilization', 'Gradient Utilization']
     num_metrics = len(NETWORK_METRICS)
     metrics = {}
-    for metric in NETWORK_METRICS:
-        metrics[metric] = ([], [])
-    for e in range(episodes):
-        state = env.env.reset()[0]
-        networks = [copy.deepcopy(network) for _ in range(mutations)]
-        envs = [copy.deepcopy(env.env) for _ in range(mutations)]
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        for metric in NETWORK_METRICS:
+            metrics[metric] = ([], [])
+        for e in range(episodes):
+            # t = time.time()
 
-        # Mutate networks
-        for network in networks:
-            network.mutate(neuron_mutation_rate=0.01, edge_mutation_rate=0.01, weight_mutation_rate=1e-5)
+            if multiprocess:
+                networks = pool.map(copy.deepcopy, [network for _ in range(mutations)])
+                envs = pool.map(copy.deepcopy, [env.env for _ in range(mutations)])
+                networks = pool.starmap(mutate, zip(networks, [mutation_args for _ in range(mutations)]))
+                total_rewards_networks = pool.starmap(simulate_episode, zip(networks, envs))
+            else:
+                networks = [copy.deepcopy(network) for _ in range(mutations)]
+                envs = [copy.deepcopy(env.env) for _ in range(mutations)]
+                network_env_tuples = zip(networks, envs)
+                for tup in network_env_tuples:
+                    reward_network = simulate_episode(tup)
+                    total_rewards_networks.append(reward_network)
 
-        network_env_tuples = list(zip(networks, envs))
+            total_rewards = np.zeros(len(total_rewards_networks))
+            for i, (reward, network) in enumerate(total_rewards_networks):
+                networks[i] = network
+                total_rewards[i] = reward
 
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-            total_rewards_networks = pool.map(simulate_episode, network_env_tuples)
-        
-        total_rewards = np.zeros(len(total_rewards_networks))
-        for i, (reward, network) in enumerate(total_rewards_networks):
-            networks[i] = network
-            total_rewards[i] = reward
+            network = networks[np.argmax(total_rewards)]
+            for metric in metrics.keys():
+                metrics[metric][0].append(network.metrics[metric][-1])
+                metrics[metric][1].append(np.mean(network.metrics[metric][-500:]))
+            test_reward = test_network(network, env, episodes=10)
+            debug_print([f'episode {e : 4} | total reward: {np.max(total_rewards) : 9.3f}; ' + \
+                        f'average test reward: {test_reward : 9.3f}; neuron count: {network.num_neurons : 6}; ' + \
+                        f'connection count: {network.num_edges : 6}; weight magnitude: {sum([np.sum(np.abs(neuron.weights)) for neuron in network.neurons]) : 9.3f}'])
 
-        # total_rewards = []
-        # for tup in network_env_state_tuples:
-        #     total_rewards_networks = simulate_episode(tup)
+            train_rewards.append(np.max(total_rewards))
+            test_rewards.append(test_reward)
 
-        network = networks[np.argmax(total_rewards)]
-        for metric in metrics.keys():
-            metrics[metric][0].append(network.metrics[metric][-1])
-            metrics[metric][1].append(np.mean(network.metrics[metric][-500:]))
-        test_reward = test_network(network, env, episodes=10)
-        debug_print([f'episode {e : 4} | total reward: {np.max(total_rewards) : 9.3f}; ' + \
-                     f'average test reward: {test_reward : 9.3f}; neuron count: {network.num_neurons : 6}; ' + \
-                     f'connection count: {network.num_edges : 6}; weight magnitude: {sum([np.sum(np.abs(neuron.weights)) for neuron in network.neurons]) : 9.3f}'])
+            if graph:
+                plot_graph(network, spring=True)
+            
+            if render:
+                visualize_episode(network, copy.deepcopy(env.env), f'rl_results/genetic_episode_{e}') 
 
-        train_rewards.append(np.max(total_rewards))
-        test_rewards.append(test_reward)
-
-        if graph:
-            plot_graph(network, spring=True)
-        
-        if render:
-            visualize_episode(network, copy.deepcopy(env.env), f'rl_results/genetic_episode_{e}') 
+            # print('train time:', time.time() - t)
 
     if plot:
         fig, axes = plt.subplots(num_metrics + 1, 1, figsize=(10, 10), gridspec_kw={'height_ratios': [1] + [0.1 for _ in range(num_metrics)]}, sharex=True)
@@ -139,15 +144,14 @@ def evolve(network, env, episodes=1000, mutations=1000, graph=False, render=Fals
         plt.show()
 
 
-
 def main():
     env = CARTPOLE
     # env = MOUNTAINCAR
     # env = LUNARLANDER
 
     network = Network(
-    num_neurons         = 16,
-    edge_probability    = 3,
+    num_neurons         = 100,
+    edge_probability    = 1,
     num_input_neurons   = env.observation_space,
     num_output_neurons  = env.action_space
     )
@@ -155,7 +159,21 @@ def main():
     network.print_info()
     # plot_graph(network)
 
-    evolve(network, env, episodes=100, mutations=128, graph=True, render=False)
+    '''
+    mutation_args = {
+        'neuron_mutation_rate': 0.01,
+        'edge_mutation_rate': 0.01,
+        'weight_mutation_rate': 1e-5
+    }
+    '''
+
+    mutation_args = {
+        'neuron_mutation_rate': 0.01,
+        'edge_mutation_rate': 0.01,
+        'weight_mutation_rate': 1e-4
+    }
+
+    evolve(network, env, mutation_args, episodes=100, mutations=128, graph=False, render=False)
 
 
 if __name__ == '__main__':

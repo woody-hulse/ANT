@@ -230,6 +230,8 @@ class Network():
             for j in range(self.num_neurons):
                 if i not in self.output_neuron_indices and j not in self.input_neuron_indices and not i == j: # Maintaining graph rules
                     # CHECK: should consider looking at proximity here (only flipping nearest neighbors)
+                    # distance = np.abs(self.neuron_positions[i][0] - self.neuron_positions[j][0]) + np.abs(self.neuron_positions[i][1] - self.neuron_positions[j][1])
+                    # if rand[i][j] * edge_mutation_rate > distance:
                     if rand[i][j] < edge_mutation_rate:
                         connection = self.adjacency_matrix[i][j]
                         if connection:
@@ -305,7 +307,7 @@ class Network():
             for i in tqdm(range(num_neurons)):
                 for j in range(num_neurons):
                     distance = np.abs(neuron_positions[i][0] - neuron_positions[j][0]) + np.abs(neuron_positions[i][1] - neuron_positions[j][1])
-                    if rand[i][j] * prob > distance:
+                    if rand[i][j] * self.prob > distance:
                         adjacency_matrix[i][j] = 1
             
             return adjacency_matrix
@@ -719,10 +721,10 @@ class Network():
 
 def main():
     network = Network(
-    num_neurons         = 50,
+    num_neurons         = 100,
     edge_probability    = 2,
-    num_input_neurons   = 1,
-    num_output_neurons  = 1
+    num_input_neurons   = 16,
+    num_output_neurons  = 8
     )
     network.optimizer = RMSProp(alpha=1e-4)
     network.print_info()

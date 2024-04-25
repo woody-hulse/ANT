@@ -121,8 +121,8 @@ def plot_graph(network, title='', spring=False, save=False, save_directory='grap
         G.add_node(i)
 
     # Set neuron colors
-    input_neuron_color = '#a3ffb2'
-    output_neuron_color = '#ffeba3'
+    input_neuron_color = '#883ab5'
+    output_neuron_color = '#3ab1b5'
     hidden_neuron_color = (0.4, 0.4, 0.4)
     critic_neuron_color = (0.9, 0.2, 0.7)
     neuron_colors = [hidden_neuron_color for _ in range(len(G.nodes))]
@@ -132,7 +132,7 @@ def plot_graph(network, title='', spring=False, save=False, save_directory='grap
 
     # Set neuron sizes
     neuron_sizes = [3 for _ in range(len(G.nodes))]
-    neuron_sizes = [15 if i in network.input_neuron_indices + network.output_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
+    neuron_sizes = [20 if i in network.input_neuron_indices + network.output_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
     neuron_sizes = [3 if i in network.critic_neuron_indices else neuron_sizes[i] for i in range(len(G.nodes))]
     
     rows, cols = np.where(network.adjacency_matrix > 0)
@@ -140,15 +140,16 @@ def plot_graph(network, title='', spring=False, save=False, save_directory='grap
     for i, edge in enumerate(zip(rows.tolist(), cols.tolist())):
         weights[i] = weight_function(network, edge)
     weights /= np.max(weights) + 1e-5
-    # print([(a, b) for a, b in edges])
+    weights += 0.01
+
     for i, edge in enumerate(zip(rows.tolist(), cols.tolist())):
         G.add_edge(edge[0], edge[1], weight=weights[i])
     
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
 
-    if spring: pos = nx.spring_layout(G)
+    if spring: pos = nx.spring_layout(G, weight=weights, seed=42)
     else: pos = network.neuron_positions
-    nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color='#b6b6b6', width=weights)
+    nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color='#b6b6b6', width=weights, edgecolors='#444444')
     
     legend_elements = [
         matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input neurons'),
