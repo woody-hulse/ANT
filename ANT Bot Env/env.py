@@ -9,7 +9,7 @@ class ANT_ENV(gym.Env):
 
     def __init__(self):
         super(ANT_ENV, self).__init__()
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(6)
         self.observation_space = spaces.Tuple((spaces.Box(low=0, high=np.inf, shape=(1,)),
                                                spaces.Discrete(2)))
         self.max_distance = 250
@@ -51,12 +51,18 @@ class ANT_ENV(gym.Env):
 
         if action == 0: self.angle += 10
         elif action == 1: self.angle -= 10
-        elif action == 2 or action == 3:
-            new_position = self.position + direction if action == 2 else self.position - direction
+        elif action in [2, 3, 4, 5]:
+            step_length = 1 if action in [2, 3] else 5
+            movement = step_length * direction if action in [2, 4] else -step_length * direction
+            new_position = self.position + movement
+            for i in range(1, step_length + 1):
+                intermediate_position = self.position + (i * direction if action in [2, 4] else -i * direction)
+                if self.check_collision(intermediate_position):
+                    new_position = intermediate_position - (direction if action in [2, 4] else -direction)
+                    reward -= 10
+                    print('Agent Collision')
+                    break
             self.position = new_position
-            if self.check_collision(new_position):
-                reward -= 10
-                print('Agent Collision')
 
         distance, visible_target = self.raycast(direction)
         distance_to_nearest_target = min(np.linalg.norm(self.position - target) for target in self.targets)
