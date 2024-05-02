@@ -4,32 +4,42 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Arrow
 
-class ANT_ENV(gym.Env):
+class Watermelon(gym.Env):
     metadata = {'render.modes': ['human']}
 
     def __init__(self):
-        super(ANT_ENV, self).__init__()
-        self.action_space = spaces.Discrete(4)
-        self.observation_space = spaces.Tuple((spaces.Box(low=0, high=np.inf, shape=(1,)),
-                                               spaces.Discrete(2)))
+        super(Watermelon, self).__init__()
+        self.action_space = spaces.Discrete(3)
+        # self.observation_space = spaces.Tuple((spaces.Box(low=0, high=np.inf, shape=(1,)),
+        #                                        spaces.Discrete(2)))
+        self.observation_space = np.array([0, 0])
         self.max_distance = 250
-        self.figure, self.axis = plt.subplots()
-        self.reset()
+        self.random_seed = 42
+        # self.reset()
+
+    def set_seed(self, seed):
+        self.random_seed = seed
 
     def generate_obstacles(self):
+        np.random.seed(self.random_seed)
         return [(np.random.uniform(8,142, 2), np.random.uniform(2,8)) for _ in range(np.random.randint(20, 80))]
 
     def generate_targets(self):
-        return [self.random_position() for _ in range(np.random.randint(3,6))]
+        np.random.seed(self.random_seed)
+        return [np.random.uniform(8, 142, 2) for _ in range(np.random.randint(3,6))]
 
     def check_collision(self, position, radius=3):
         return any(np.linalg.norm(center - position) <= obstacle_radius + radius for center, obstacle_radius in self.obstacles)
 
     def random_position(self):
-        while True:
-            position = np.random.uniform(20, 130, 2)
-            if not self.check_collision(position):
-                return position
+        position = np.array([20 + 110/2, 20 + 110/2])
+        return position
+        # np.random.seed(self.random_seed)
+        # positions = np.random.uniform(20, 130, size=(100, 2))
+        # for i in range(100):
+        #     position = positions[i]
+        #     if not self.check_collision(position):
+        #         return position
 
     def raycast(self, direction):
         step_size, distance = 1, 0
@@ -51,12 +61,19 @@ class ANT_ENV(gym.Env):
 
         if action == 0: self.angle += 10
         elif action == 1: self.angle -= 10
-        elif action == 2 or action == 3:
-            new_position = self.position + direction if action == 2 else self.position - direction
-            self.position = new_position
-            if self.check_collision(new_position):
-                reward -= 10
-                print('Agent Collision')
+        # elif action == 2 or action == 3:
+        #     new_position = self.position + direction if action == 2 else self.position - direction
+        #     self.position = new_position
+        #     if self.check_collision(new_position):
+        #         reward -= 10
+        #         # print('Agent Collision')
+
+        reward -= 0.1
+        new_position = self.position + direction
+        self.position = new_position
+        if self.check_collision(new_position):
+            reward -= 10
+            # print('Agent Collision')
 
         distance, visible_target = self.raycast(direction)
         distance_to_nearest_target = min(np.linalg.norm(self.position - target) for target in self.targets)
@@ -64,13 +81,15 @@ class ANT_ENV(gym.Env):
         return (distance, visible_target), reward, distance_to_nearest_target < 5, {}
 
     def reset(self):
+        # self.random_seed = seed
         self.obstacles = self.generate_obstacles()
         self.targets = self.generate_targets()
         self.position = self.random_position()
         self.angle = 0
         return self.raycast(np.array([np.cos(np.radians(self.angle)), np.sin(np.radians(self.angle))]))
 
-    def render(self, observation, action, mode='human', close=False):
+    def render(self, observation=None, action=None, mode='human', close=False):
+        self.figure, self.axis = plt.subplots()
         self.axis.clear()
         self.axis.set_xlim(0, 150)
         self.axis.set_ylim(0, 150)
@@ -86,8 +105,16 @@ class ANT_ENV(gym.Env):
                                   color='black'))
         plt.pause(0.01)
 
+        width, height = self.figure.canvas.get_width_height()
+        img = np.frombuffer(self.figure.canvas.tostring_rgb(), dtype=np.uint8)
+        img = img.reshape(1280, 960, 3)
+
+        self.close()
+        return img
+
     def close(self): plt.close()
 
+'''
 # Testing the environment with random actions
 env = ANT_ENV()
 observations = env.reset()
@@ -102,3 +129,4 @@ for _ in range(200):
         break
 
 env.close()
+'''

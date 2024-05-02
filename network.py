@@ -50,7 +50,7 @@ class Neuron(Diff):
         self.initialize_weights()
     
     def initialize_weights(self):
-        # np.random.seed(42) # optional deterministic weight initialization
+        # np.random.seed(42) # deterministic weight initialization
         self.input_size = len(self.prev)
         self.output_size = len(self.next)
         self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.1
@@ -212,6 +212,8 @@ class Network():
             'output_grad': [],
 
             'mean_var': [],
+
+            'rewards': []
         }
 
     '''
@@ -225,6 +227,8 @@ class Network():
             self.neurons.append(neuron)
 
         # Modify existing connections
+        dense_edges = self.num_neurons * (self.num_neurons - 1) / 2
+        probs = [self.num_edges / dense_edges, (dense_edges - self.num_edges) / dense_edges]
         rand = np.random.uniform(low=0, high=1, size=(self.num_neurons + num_new_neurons, self.num_neurons + num_new_neurons))
         for i in range(self.num_neurons):
             for j in range(self.num_neurons):
@@ -232,8 +236,8 @@ class Network():
                     # CHECK: should consider looking at proximity here (only flipping nearest neighbors)
                     # distance = np.abs(self.neuron_positions[i][0] - self.neuron_positions[j][0]) + np.abs(self.neuron_positions[i][1] - self.neuron_positions[j][1])
                     # if rand[i][j] * edge_mutation_rate > distance:
-                    if rand[i][j] < edge_mutation_rate:
-                        connection = self.adjacency_matrix[i][j]
+                    connection = int(self.adjacency_matrix[i][j])
+                    if rand[i][j] < edge_mutation_rate * probs[connection]:
                         if connection:
                             self.adjacency_matrix[i][j] = 0
                             self.neurons[i].remove_next_connection(self.neurons[j])
@@ -447,7 +451,6 @@ class Network():
 
     '''
     Parallelized backward pass [SLOW! UNUSED]
-    '''
     def parallel_backward(self, loss, y, y_hat, update_metrics=True):
         # Metrics
         energy = 0
@@ -494,6 +497,7 @@ class Network():
             self.metrics['weight_energy'].append(weight_energy)
             self.metrics['prop_input'].append(prop_input)
             self.metrics['prop_grad'].append(prop_grad)
+    '''
 
     '''
     Compute backward pass step
@@ -602,6 +606,58 @@ class Network():
             self.metrics['prop_input'].append(prop_input)
             self.metrics['prop_grad'].append(prop_grad)
 
+    
+    '''
+    Parallelized forward step
+    '''
+    def neuron_forward(self, neuron):
+        neuron.outputs = neuron.forward()
+        if neuron in self.output_neurons:
+            output_index = self.output_neurons.index(neuron)
+            self.network_output[output_index] = neuron.outputs
+        elif neuron not in self.critic_neurons:
+            for next, output in zip(neuron.next, neuron.outputs):
+                input_index = next.prev.index(neuron)
+                next.next_inputs[input_index] = output
+
+    def parallel_forward(self, inputs, pool):
+        self.network_output = np.zeros(self.num_output_neurons)
+        for i, neuron in enumerate(self.input_neurons):
+            neuron.inputs = np.array([inputs[i]])
+
+        for neuron in self.neurons:
+            if not neuron in self.input_neurons:
+                neuron.inputs = neuron.next_inputs
+         
+        pool.map(self.neuron_forward, self.neurons)
+
+        return self.network_output
+
+
+    '''
+    Parallelized backward step
+    '''
+    def neuron_backward(self, neuron): 
+        dldw, dldb, output_J = neuron.backward()
+        self.optimizer(neuron, [dldw, dldb])
+
+        if neuron in self.input_neurons: return
+        for prev, prev_J in zip(neuron.prev, output_J):
+            input_index = prev.next.index(neuron)
+            prev.next_input_J[input_index] = prev_J
+
+    def parallel_backward(self, dlda, pool, clip=None):
+        for i, neuron in enumerate(self.output_neurons):
+            neuron.input_J = np.array([dlda[i]])
+
+        for neuron in self.neurons:
+            if not neuron in self.output_neurons + self.critic_neurons:
+                neuron.input_J = neuron.next_input_J
+
+        pool.map(self.neuron_backward, self.neurons)
+        
+        
+
 
     '''
     Fit a simple input/output mapping
@@ -704,10 +760,12 @@ class Network():
         self.metrics['prop_grad'].append(compute_prop_grad(self))
 
     def get_metrics_string(self, metrics=['pred', 'loss', 'energy', 'grad_energy', 'prop_input', 'prop_grad']):
-        metrics_string = ''
-        for metric in metrics:
-            metrics_string += metric + '=' + f'{np.sum(self.metrics[metric][-1]) : 10.3f}' + '; '
-        return metrics_string[:-2]
+        try:
+            metrics_string = ''
+            for metric in metrics:
+                metrics_string += metric + '=' + f'{np.sum(self.metrics[metric][-1]) : 10.3f}' + '; '
+            return metrics_string[:-2]
+        except: return ''
 
     def plot_metrics(self, title='', metrics=['pred', 'true', 'loss', 'energy', 'grad_energy']):
         for metric in metrics:
@@ -721,8 +779,8 @@ class Network():
 
 def main():
     network = Network(
-    num_neurons         = 100,
-    edge_probability    = 2,
+    num_neurons         = 64,
+    edge_probability    = 1.8,
     num_input_neurons   = 16,
     num_output_neurons  = 8
     )
@@ -733,9 +791,13 @@ def main():
     # X, Y = ripple_sinusoidal_pulse(time=1000, n=10)
     # network.fit(X, Y, plot=False)
 
-    for i in range(3):
-        network.mutate(neuron_mutation_rate=2, edge_mutation_rate=0.001, weight_mutation_rate=0.001)
-        plot_graph(network, spring=True)
+    mutation_args = {
+        'neuron_mutation_rate': 1,
+        'edge_mutation_rate': 0.01,
+        'weight_mutation_rate': 0.001
+    }
+
+    visualize_evolution(network, mutation_args=mutation_args, gif=True, time=100)
 
     # network.fit(X, Y, plot=False)
 

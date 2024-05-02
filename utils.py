@@ -116,6 +116,7 @@ def weight_function(network, edge):
 
 def plot_graph(network, title='', spring=False, save=False, save_directory='graph_images/'):
     G = nx.Graph()
+    plt.figure(figsize=(6, 6))
 
     for i, node in enumerate(network.neurons):
         G.add_node(i)
@@ -141,15 +142,20 @@ def plot_graph(network, title='', spring=False, save=False, save_directory='grap
         weights[i] = weight_function(network, edge)
     weights /= np.max(weights) + 1e-5
     weights += 0.01
+    # print(np.mean(weights))
 
     for i, edge in enumerate(zip(rows.tolist(), cols.tolist())):
         G.add_edge(edge[0], edge[1], weight=weights[i])
     
     edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
 
-    if spring: pos = nx.spring_layout(G, weight=weights, seed=42)
+    if spring: 
+        pos = nx.spring_layout(G, k=3/np.sqrt(network.num_neurons), pos=network.neuron_positions, iterations=20)
+        network.neuron_positions = pos
     else: pos = network.neuron_positions
-    nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color='#b6b6b6', width=weights, edgecolors='#444444')
+    edge_color = '#b6b6b6'
+    # edge_color = weights
+    nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=edge_color, width=weights, edgecolors='#444444')
     
     legend_elements = [
         matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input neurons'),
@@ -195,15 +201,15 @@ def arr(array):
 def visualize_episode(network, env, name, time=500):
     # debug_print(['Visualizing episode'])
 
-    state = env.reset()[0]
+    state = env.reset()
 
     image_frames = []
     for t in tqdm(range(time)):
         logits = network.forward(state)
         action = np.argmax(logits)
-        state, reward, done, _, _ = env.env.step(action)
+        state, reward, done = env.step(action)
         
-        image_array = env.render()
+        image_array = env.env.render()
         image_frame = Image.fromarray(image_array)
         image_frames.append(image_frame)
         
@@ -214,3 +220,45 @@ def visualize_episode(network, env, name, time=500):
                         duration = 20,
                         loop = 0,
                         append_images = image_frames[1:])
+    
+
+def visualize_evolution(network, gif=False, mutation_args=None, time=10):
+    if not mutation_args:
+        mutation_args = {
+            'neuron_mutation_rate': 1,
+            'edge_mutation_rate': 0.05,
+            'weight_mutation_rate': 1e-4
+        }
+    if gif: save=True
+    else: save=False
+    for i in tqdm(range(time)):
+        network.mutate(**mutation_args)
+        network.print_info()
+        plot_graph(network, title=f'e{i}', spring=True, save=save, save_directory='graph_evolution/')
+    
+    if gif: convert_files_to_gif('graph_evolution/', 'graph_evolution.gif')
+
+if __name__ == '__main__':
+
+    # Sample data
+    x = np.linspace(0, 10, 100)
+    y = np.sin(x)
+
+    # Creating the plot
+    plt.figure(figsize=(8, 6), dpi=300)  # High-resolution setting
+    plt.plot(x, y, label='sin(x)', color='blue', linewidth=2)  # Simple color and line width
+
+    # Titles and labels
+    plt.title('Example of a Line Plot for a Conference', fontsize=14)
+    plt.xlabel('X Axis', fontsize=12)
+    plt.ylabel('Y Axis', fontsize=12)
+
+    # Adding a legend and grid
+    plt.legend(fontsize=12)
+    plt.grid(True)
+
+    # Tight layout often looks better
+    plt.tight_layout()
+
+    # Save as a high-resolution PNG file
+    plt.savefig('conference_line_plot.png')

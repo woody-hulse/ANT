@@ -2,18 +2,31 @@
 Classes of gym environments and their properties
 '''
 
+import sys
+import os
+
 import gym
 import numpy as np
 
 from core.activations import *
 from core.optimizers import *
 from core.losses import *
+from custom_env.env import *
+
+sys.path.append(os.path.abspath('../CARL/carl/envs/gymnasium/'))
+
+from classic_control.carl_cartpole import CARLCartPole
+from classic_control.carl_acrobot import CARLAcrobot
 
 class Environment():
-    def __init__(self, env, continuous, mu_var=False, num_actions=1, minimizer=None):
-
+    def __init__(self, env, continuous, mu_var=False, num_observations=None, num_actions=1, minimizer=None, old=False):
         self.env = env
-        self.observation_space = env.observation_space.shape[0]
+        if num_observations: 
+            self.observation_space = num_observations
+            self.obs = True
+        else: 
+            self.observation_space = env.observation_space.shape[0]
+            self.obs = False
         if continuous:
             if mu_var: self.action_space = env.action_space.shape[0] * 2
             else: self.action_space = env.action_space.shape[0]
@@ -31,11 +44,21 @@ class Environment():
         self.var_activation = Sigmoid()
         self.critic_activation = Linear()
 
-        self.optimizer = ADAM(alpha=1e-6, beta1=0.9, beta2=0.9)
-        # self.optimizer = RMSProp(alpha=1e-7, beta=0.99)
+        # self.optimizer = ADAM(alpha=1e-6, beta1=0.9, beta2=0.9)
+        self.optimizer = RMSProp(alpha=1e-6, beta=0.99, reg=0)
 
         self.parametrization = None
         self.gamma = 0.99
+        self.epsilon = 1
+        self.epsilon_decay = 0.99
+
+        self.old = old
+
+    def discrete_action(self, logits):
+        probs = Softmax()(logits)
+        argmax = np.argmax(probs)
+        p = self.epsilon * probs + np.eye(len(logits))[argmax] * (1 - self.epsilon)
+        return np.random.choice(len(logits), p=p)
 
     def discretize_output(self, action):
         cutoffs = np.array([(i + 1) / self.num_actions for i in range(self.num_actions)])
@@ -84,19 +107,41 @@ class Environment():
         next_state, reward, done, _, _ = self.env.step(action)
         
         return next_state, reward, done, action_desc
+    
+    def step(self, action):
+        if self.old: state, reward, done, _ = self.env.step(action)
+        else: state, reward, done, _, _ = self.env.step(action)
+        if self.obs: state = state['obs']
+        return state, reward, done
+    
+    def reset(self):
+        if self.old: state = self.env.reset()
+        else: state = self.env.reset()[0]
+        if self.obs: state = state['obs']
+        return state
 
 cartpole = gym.make('CartPole-v1', render_mode='rgb_array')
+carl_cartpole = CARLCartPole()
 pendulum = gym.make('Pendulum-v1', render_mode='rgb_array')
 mountaincar = gym.make('MountainCar-v0', render_mode='rgb_array')
 lunarlander = gym.make('LunarLander-v2', render_mode='rgb_array')
+acrobot = gym.make('Acrobot-v1', render_mode='rgb_array')
+carl_acrobot = CARLAcrobot()
+
 mountaincar_continuous = gym.make('MountainCarContinuous-v0', render_mode='rgb_array')
 bipedalwalker = gym.make('BipedalWalker-v3', render_mode='rgb_array')
 ant = gym.make('Ant-v4', render_mode='rgb_array')
+watermelon = Watermelon()
 
 CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2)
+CARL_CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2)
 PENDULUM = Environment(pendulum, continuous=True, mu_var=True)
 LUNARLANDER = Environment(lunarlander, continuous=False, mu_var=False, num_actions=4)
 MOUNTAINCAR = Environment(mountaincar, continuous=False, mu_var=False, num_actions=3)
+ACROBOT = Environment(acrobot, continuous=False, mu_var=False, num_actions=3)
+CARL_ACROBOT = Environment(carl_acrobot, continuous=False, mu_var=False, num_actions=3, num_observations=6)
+WATERMELON = Environment(watermelon, continuous=False, mu_var=False, num_actions=3, old=True)
+
 MOUNTAINCAR_CONTINUOUS = Environment(mountaincar_continuous, continuous=True, mu_var=True)
 BIPEDALWALKER = Environment(bipedalwalker, continuous=True, mu_var=True)
 ANT = Environment(ant, continuous=True, mu_var=True)
