@@ -13,7 +13,7 @@ class PolicyNetwork(tf.keras.Model):
     def __init__(self, num_actions, hidden_size=128, num_hidden=1):
         super().__init__()
 
-        self.network = tf.keras.Sequential([tf.keras.layers.Dense(hidden_size, activation='relu') for _ in range(num_hidden)] \
+        self.network = tf.keras.Sequential([tf.keras.layers.Dense(hidden_size, activation='tanh') for _ in range(num_hidden)] \
                                                 + [tf.keras.layers.Dense(num_actions, activation='softmax')])
 
     def call(self, x):

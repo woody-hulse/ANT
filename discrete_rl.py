@@ -3,7 +3,8 @@
 import multiprocessing
 
 from utils import *
-from network import *
+from ant import ANT
+from ann import ANN
 from environments import *
 import seaborn as sns
 sns.set_style(style='whitegrid')
@@ -30,9 +31,6 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         total_reward = 0
         rewards = []
         gradients = []
-
-        l = []
-        g = []
         
         image_frames = []
         pbar = tqdm(range(time))
@@ -44,54 +42,31 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
                 image_frame = Image.fromarray(image_array)
                 image_frames.append(image_frame)
 
-            if pool: logits = network.parallel_forward(state, pool)
-            else: logits = network.forward(state)
-            probs = Softmax()(logits)
-            # probs = probs + np.random.normal(loc=0, scale=np.std(probs), size=probs.shape)
-            # print(probs)
-            # probs = Softmax()(Softmax()(logits) * (1 + 4 * np.eye(env.action_space)[np.argmax(logits)]))
-            e_probs = probs # + np.random.normal(loc=0, scale=0.0002, size=probs.shape)
-            action = np.argmax(e_probs)
-            action = env.discrete_action(logits)
-            # action = np.random.choice(len(probs), p=probs)
+            action, probs = network.discrete_act(state, pool)
             logprobs = np.log(probs[action])
             loss = -np.sum(logprobs)
 
-            state, reward, done, _, _ = env.env.step(action)
-            # reward = 1 - env.minimizer(*state)
-            # reward = 0.5 - np.abs(state[2])
-            # if done: reward -= 2
-            # reward = np.abs(state[1]) + done
-            grad = np.eye(env.action_space)[action] - probs
-            # grad = np.ones_like(logits) * np.abs(state[2])
-            # print(grad)
+            state, reward, done = env.step(action)
+            grad = probs - np.eye(env.action_space)[action]
             network.metrics['loss'].append(loss)
             gradients.append(grad)
             rewards.append(reward)
             total_reward += reward
-            # total_reward += 15 * done
 
 
-            discounted_gradients = compute_discounted_gradients(gradients, rewards, gamma=0.999)#  / (t + 1)
-            err = np.eye(env.action_space)[action] * np.abs(state[2])
-            if pool: network.parallel_backward(discounted_gradients, pool)
-            else: 
-                for i in range(1):
-                    network.backward_(-err, np.array([0]), clip=10, t=t)
-                # network.clear_jacobians(alpha=0)
-            # s = np.sum(np.abs(discounted_gradients))
-
-            # l.append(reward)
-            # g.append(np.sum(np.square(grad)))
+            # grad = compute_discounted_gradients(gradients, rewards, gamma=0.99)#  / (t + 1)
+            if pool: network.parallel_backward(grad, pool)
+            else: network.backward(grad, clip=100, t=t, accumulate=True)
+            
             e += np.argmax(probs) == action
 
             max_chars = 160
-            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={action : 2}; conf={probs[action] : 6.3f}; ' + \
+            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={action : 2}; conf={probs[action] : 6.9f}; ' + \
             network.get_metrics_string(metrics=['energy'])
             if len(pbar_string) > max_chars: pbar_string = pbar_string[:max_chars - 3] + '...'
             pbar.set_description(pbar_string)
 
-            if (done or t == time - 1) and render and (t % 10 == 0):
+            if (done or t == time - 1) and render and (episode % 50 == 0):
                 image_frames[0].save(f'rl_results/episode{episode}.gif', 
                             save_all = True, 
                             duration = 20,
@@ -102,35 +77,36 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
             if done: break
 
-        # plt.plot(l, label='loss')
-        # plt.plot(g, label='grads')
-        # plt.legend()
-        # plt.show()
-
         env.epsilon *= env.epsilon_decay
+
+        # network.apply_accumulated_gradients()
+        network.apply_discounted_accumulated_gradients(rewards, gamma=0.99)
 
         if gif and episode % 10 == 0:
             convert_files_to_gif(directory='graph_images/', name=f'graph_results/network_weights_episode{episode}.gif')
         
-        for metric in metrics.keys():
-            metrics[metric][0].append(network.metrics[metric][-1])
-            metrics[metric][1].append(np.mean(network.metrics[metric][-t:]))
+        if network.use_metrics:
+            for metric in metrics.keys():
+                metrics[metric][0].append(network.metrics[metric][-1])
+                metrics[metric][1].append(np.mean(network.metrics[metric][-t:]))
         episode_rewards.append(total_reward)
 
     if plot:
         fig, axes = plt.subplots(num_metrics + 1, 1, figsize=(10, 10), gridspec_kw={'height_ratios': [1] + [0.1 for _ in range(num_metrics)]}, sharex=True)
         axes[0].set_title('Training summary')
         for a in [1, 5, 25, 125, 625]:
+            if a > len(episode_rewards): continue
             if a == 1:
                 axes[0].plot(episode_rewards, color='blue', label='Total reward')
             else:
                 ma = moving_average(episode_rewards, a)
                 axes[0].plot(ma, label=f'Total reward ({a} episode moving average)')
         axes[0].legend()
-        for i, ((metric, values), label) in enumerate(zip(metrics.items(), NETWORK_METRICS_LABELS)):
-            axes[i + 1].plot(metrics[metric][0], label=label)
-            axes[i + 1].plot(metrics[metric][1], label='Mean ' + label)
-            axes[i + 1].legend()
+        if network.use_metrics:
+            for i, ((metric, values), label) in enumerate(zip(metrics.items(), NETWORK_METRICS_LABELS)):
+                axes[i + 1].plot(metrics[metric][0], label=label)
+                axes[i + 1].plot(metrics[metric][1], label='Mean ' + label)
+                axes[i + 1].legend()
         plt.legend()
         plt.xlabel('Episode')
         plt.show()
@@ -139,7 +115,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
 
 
 def convergence_train(env, size, learning_rate, episodes):
-    network = Network(
+    network = ANT(
     num_neurons         = size,
     edge_probability    = 3,
     num_input_neurons   = env.observation_space,
@@ -158,19 +134,26 @@ def main():
     # env = LUNARLANDER
     # env = ACROBOT
     # env = CARL_CARTPOLE
+    # env = WATERMELON
 
-    network = Network(
+    base_ant = ANT(
     num_neurons         = 32,
-    edge_probability    = 4,
+    edge_probability    = 2,
     num_input_neurons   = env.observation_space,
     num_output_neurons  = env.action_space
     )
-    env.configure_newtork(network)
-    network.print_info()
+    base_ann = ANN([env.observation_space, 14, 14, env.action_space])
+
+    network = base_ann
+    # env.configure_newtork(network)
+    # network.print_info()
     # plot_graph(network)
+    # network.load('saved_networks/genetic_7_cartpole.pkl')
+    # network.optimizer = RMSProp(alpha=1e-5, beta=0.99)
+    # network.reset_weights()
 
     # with multiprocessing.Pool(processes=12) as pool:
-    train(network, env, episodes=1000, time=200, render=False, plot=True, gif=False)
+    train(network, env, episodes=2000, time=200, render=False, plot=True, gif=False)
 
 
 if __name__ == '__main__':

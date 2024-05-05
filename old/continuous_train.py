@@ -1,4 +1,4 @@
-from network import ContinuousNetwork, MSE, SGD, ADAM, RMSProp
+from ant import ContinuousNetwork, MSE, SGD, ADAM, RMSProp
 
 from utils import *
 from old.datasets import *

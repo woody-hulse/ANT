@@ -19,7 +19,8 @@ from classic_control.carl_cartpole import CARLCartPole
 from classic_control.carl_acrobot import CARLAcrobot
 
 class Environment():
-    def __init__(self, env, continuous, mu_var=False, num_observations=None, num_actions=1, minimizer=None, old=False):
+    def __init__(self, env, continuous, mu_var=False, num_observations=None, num_actions=1, minimizer=None, old=False, name=''):
+        self.name = name
         self.env = env
         if num_observations: 
             self.observation_space = num_observations
@@ -37,15 +38,14 @@ class Environment():
         self.minimizer = minimizer
 
         # defaults
-        self.neuron_activation = Sigmoid()
+        self.neuron_activation = Linear()
         if continuous: self.output_activation = Sigmoid()
         else: self.output_activation = Linear()
         self.mu_activation = Tanh()
         self.var_activation = Sigmoid()
-        self.critic_activation = Linear()
 
         # self.optimizer = ADAM(alpha=1e-6, beta1=0.9, beta2=0.9)
-        self.optimizer = RMSProp(alpha=1e-6, beta=0.99, reg=0)
+        self.optimizer = RMSProp(alpha=1e-5, beta=0.99, reg=0)
 
         self.parametrization = None
         self.gamma = 0.99
@@ -73,13 +73,12 @@ class Environment():
         return np.random.choice(action, size=1)
 
     def configure_newtork(self, network):
+        for neuron in network.neurons: neuron.activation = self.neuron_activation
         if self.mu_var:
             for neuron in network.mu_neurons: neuron.activation = self.mu_activation
             for neuron in network.var_neurons: neuron.activation = self.var_activation
         else:
             for neuron in network.output_neurons: neuron.activation = self.output_activation
-
-        for neuron in network.critic_neurons: neuron.activation = self.critic_activation
 
         network.optimizer = self.optimizer
 
@@ -133,18 +132,18 @@ bipedalwalker = gym.make('BipedalWalker-v3', render_mode='rgb_array')
 ant = gym.make('Ant-v4', render_mode='rgb_array')
 watermelon = Watermelon()
 
-CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2)
-CARL_CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2)
-PENDULUM = Environment(pendulum, continuous=True, mu_var=True)
-LUNARLANDER = Environment(lunarlander, continuous=False, mu_var=False, num_actions=4)
-MOUNTAINCAR = Environment(mountaincar, continuous=False, mu_var=False, num_actions=3)
-ACROBOT = Environment(acrobot, continuous=False, mu_var=False, num_actions=3)
-CARL_ACROBOT = Environment(carl_acrobot, continuous=False, mu_var=False, num_actions=3, num_observations=6)
-WATERMELON = Environment(watermelon, continuous=False, mu_var=False, num_actions=3, old=True)
+CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2, name='cartpole')
+CARL_CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2, name='carl_cartpole')
+PENDULUM = Environment(pendulum, continuous=True, mu_var=True, name='pendulum')
+LUNARLANDER = Environment(lunarlander, continuous=False, mu_var=False, num_actions=4, name='lunarlander')
+MOUNTAINCAR = Environment(mountaincar, continuous=False, mu_var=False, num_actions=3, name='mountaincar')
+ACROBOT = Environment(acrobot, continuous=False, mu_var=False, num_actions=3, name='acrobot')
+CARL_ACROBOT = Environment(carl_acrobot, continuous=False, mu_var=False, num_actions=3, num_observations=6, name='carl_acrobot')
+WATERMELON = Environment(watermelon, continuous=False, mu_var=False, num_actions=6, old=True, name='watermelon')
 
-MOUNTAINCAR_CONTINUOUS = Environment(mountaincar_continuous, continuous=True, mu_var=True)
-BIPEDALWALKER = Environment(bipedalwalker, continuous=True, mu_var=True)
-ANT = Environment(ant, continuous=True, mu_var=True)
+MOUNTAINCAR_CONTINUOUS = Environment(mountaincar_continuous, continuous=True, mu_var=True, name='mountaincar_continuous')
+BIPEDALWALKER = Environment(bipedalwalker, continuous=True, mu_var=True, name='bipedalwalker')
+ANTENV = Environment(ant, continuous=True, mu_var=True, name='ant')
 
 '''
 Make environment-specific changes here

@@ -9,7 +9,7 @@ class Watermelon(gym.Env):
 
     def __init__(self):
         super(Watermelon, self).__init__()
-        self.action_space = spaces.Discrete(3)
+        self.action_space = spaces.Discrete(6)
         # self.observation_space = spaces.Tuple((spaces.Box(low=0, high=np.inf, shape=(1,)),
         #                                        spaces.Discrete(2)))
         self.observation_space = np.array([0, 0])
@@ -61,19 +61,18 @@ class Watermelon(gym.Env):
 
         if action == 0: self.angle += 10
         elif action == 1: self.angle -= 10
-        # elif action == 2 or action == 3:
-        #     new_position = self.position + direction if action == 2 else self.position - direction
-        #     self.position = new_position
-        #     if self.check_collision(new_position):
-        #         reward -= 10
-        #         # print('Agent Collision')
-
-        reward -= 0.1
-        new_position = self.position + direction
-        self.position = new_position
-        if self.check_collision(new_position):
-            reward -= 10
-            # print('Agent Collision')
+        elif action in [2, 3, 4, 5]:
+            step_length = 1 if action in [2, 3] else 5
+            movement = step_length * direction if action in [2, 4] else -step_length * direction
+            new_position = self.position + movement
+            for i in range(1, step_length + 1):
+                intermediate_position = self.position + (i * direction if action in [2, 4] else -i * direction)
+                if self.check_collision(intermediate_position):
+                    new_position = intermediate_position - (direction if action in [2, 4] else -direction)
+                    reward -= 10
+                    # print('Agent Collision')
+                    break
+            self.position = new_position
 
         distance, visible_target = self.raycast(direction)
         distance_to_nearest_target = min(np.linalg.norm(self.position - target) for target in self.targets)
@@ -86,7 +85,7 @@ class Watermelon(gym.Env):
         self.targets = self.generate_targets()
         self.position = self.random_position()
         self.angle = 0
-        return self.raycast(np.array([np.cos(np.radians(self.angle)), np.sin(np.radians(self.angle))]))
+        return [self.raycast(np.array([np.cos(np.radians(self.angle)), np.sin(np.radians(self.angle))]))]
 
     def render(self, observation=None, action=None, mode='human', close=False):
         self.figure, self.axis = plt.subplots()

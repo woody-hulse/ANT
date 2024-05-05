@@ -1,7 +1,7 @@
 import mygrad as mg
 
 from utils import *
-from network import *
+from ant import *
 from environments import *
 
 def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False):

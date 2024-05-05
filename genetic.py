@@ -1,11 +1,13 @@
 import multiprocessing
+import copy
 import warnings ; warnings.warn = lambda *args,**kwargs: None # for gym np.bool8
 
 from utils import *
-from network import *
+from ant import ANT
+from ann import ANN
 from environments import *
-import seaborn as sns
-sns.set_style(style='whitegrid')
+# import seaborn as sns
+# sns.set_style(style='whitegrid')
 
 EPISODES = 10
 TRAIN = True
@@ -19,35 +21,31 @@ def compute_discounted_gradients(gradients, rewards, gamma=0.99):
     return discounted_gradients
 
 def simulate_episode(network, env, seed=None, episodes=EPISODES, train=TRAIN, time=TIME):
-    total_reward = 0
+    total_rewards = np.zeros(episodes)
     for episode in range(episodes):
+        total_reward = 0
         if seed: env.env.set_seed(seed)
         state = env.reset()
 
         rewards = []
-        gradients = []
         for t in range(time):
-            logits = network.forward(state)
-            action = np.argmax(logits)
-            # action = np.random.choice(n=len(logits), p=logits)
-            # action = env.discrete_action(logits)
-            env.epsilon *= env.epsilon_decay
+            action, probs = network.discrete_act(state, None)
+            # env.epsilon *= env.epsilon_decay
             state, reward, done = env.step(action)
             rewards.append(reward)
             total_reward += reward
 
             if train:
-                probs = Softmax()(logits)
                 logprobs = np.log(probs[action])
-                grad = np.eye(env.env.action_space.n)[action] - probs
-                gradients.append(grad)
-                discounted_gradients = compute_discounted_gradients(gradients, rewards, gamma=0.99)
-                network.backward_(discounted_gradients, np.array([0]), clip=10, update_metrics=True, t=t)
+                grad = probs - np.eye(env.action_space)[action]
+                network.backward(grad, clip=100, t=t, accumulate=True)
 
             if done: break
 
+        if train: network.apply_discounted_accumulated_gradients(rewards, gamma=0.99)
         network.metrics['rewards'].append(total_reward)
-    return total_reward / episodes, network
+        total_rewards[episode] = total_reward
+    return np.mean(total_rewards), network
 
 
 def test_network(network, env, seed=None, episodes=1, train=False, time=TIME):
@@ -56,30 +54,26 @@ def test_network(network, env, seed=None, episodes=1, train=False, time=TIME):
         if seed: env.env.set_seed(seed)
         state = env.reset()
         total_reward = 0
+
         rewards = []
-        gradients = []
         pbar = tqdm(range(time))
         for t in pbar:
-            logits = network.forward(state)
-            action = np.argmax(logits)
-            # action = env.discrete_action(logits)
+            action, probs = network.discrete_act(state, None)
             state, reward, done = env.step(action)
             rewards.append(reward)
             total_reward += reward
 
             if train:
-                probs = Softmax()(logits)
                 logprobs = np.log(probs[action])
-                grad = np.eye(env.env.action_space.n)[action] - probs
-                gradients.append(grad)
-                discounted_gradients = compute_discounted_gradients(gradients, rewards, gamma=0.99)
-                network.backward_(discounted_gradients, np.array([0]), clip=10, update_metrics=False, t=t)
+                grad = probs - np.eye(env.action_space)[action]
+                network.backward(grad, clip=100, t=t, accumulate=True)
 
             pbar_string = f'Episode {episode : 05}: reward={sum(rewards) : 9.3f}'
             pbar.set_description(pbar_string) 
             
             if done: break
 
+        if train: network.apply_discounted_accumulated_gradients(rewards, gamma=0.99)
         total_rewards[episode] = total_reward
     return np.mean(total_rewards)
 
@@ -89,7 +83,7 @@ def mutate(network, args):
     return network
 
 
-def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, graph=False, render=False, plot=True, multiprocess=True):
+def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, graph=False, render=False, plot=True, multiprocess=True, save=False):
     train_rewards = []
     test_rewards = []
     NETWORK_METRICS = ['energy', 'grad_energy', 'weight_energy', 'prop_input', 'prop_grad']
@@ -98,6 +92,7 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
     metrics = {}
 
     best_networks = [copy.deepcopy(network) for _ in range(k)]
+    best_test_reward = -np.inf
     with multiprocessing.Pool(processes=12) as pool:# multiprocessing.cpu_count()) as pool:
         for metric in NETWORK_METRICS:
             metrics[metric] = ([], [])
@@ -128,10 +123,15 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
             
             best_networks = np.array(networks)[np.argsort(total_rewards)[-k:]]
             network = best_networks[-1]
-            for metric in metrics.keys():
-                metrics[metric][0].append(network.metrics[metric][-1])
-                metrics[metric][1].append(np.mean(network.metrics[metric][-500:]))
+            if network.use_metrics:
+                for metric in metrics.keys():
+                    metrics[metric][0].append(network.metrics[metric][-1])
+                    metrics[metric][1].append(np.mean(network.metrics[metric][-500:]))
             test_reward = test_network(network, env, episodes=100, train=False)#, seed=seeds[0])
+            if test_reward > best_test_reward:
+                best_test_reward = test_reward
+                if save:
+                    network.save(f'saved_networks/genetic_{e}_{env.name}.pkl')
             debug_print([f'episode {e : 4} | total reward: {np.max(total_rewards) : 9.3f}; ' + \
                         f'average test reward: {test_reward : 9.3f}; neuron count: {network.num_neurons : 6}; ' + \
                         f'connection count: {network.num_edges : 6}; weight magnitude: {sum([np.sum(np.abs(neuron.weights)) for neuron in network.neurons]) : 9.3f}'])
@@ -169,7 +169,7 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
     return network
 
 def train(env, size, learning_rate, episodes):
-    network = Network(
+    network = ANT(
     num_neurons         = size,
     edge_probability    = 1.5,
     num_input_neurons   = env.observation_space,
@@ -191,22 +191,27 @@ def train(env, size, learning_rate, episodes):
 
 
 def main():
-    # env = CARTPOLE        # *
-    env = MOUNTAINCAR
+    env = CARTPOLE        # *
+    # env = MOUNTAINCAR
     # env = LUNARLANDER     # *
     # env = WATERMELON
     # env = ACROBOT         # *
     # env = CARL_CARTPOLE   # *
     # env = CARL_ACROBOT
 
-    network = Network(
+    base_ant = ANT(
     num_neurons         = 32,
     edge_probability    = 1.5,
     num_input_neurons   = env.observation_space,
     num_output_neurons  = env.action_space
     )
-    env.configure_newtork(network)
-    network.print_info()
+
+    base_ann = ANN([env.observation_space, 14, 14, env.action_space])
+
+    network = base_ann
+    # env.configure_newtork(network)
+    # network.load('saved_networks/genetic_10_lunarlander.pkl')
+    # network.print_info()
     # plot_graph(network)
 
     '''
@@ -218,12 +223,13 @@ def main():
     '''
 
     mutation_args = {
-        'neuron_mutation_rate': 1,
-        'edge_mutation_rate': 0.05,
-        'weight_mutation_rate': 1e-4
+
+        'neuron_mutation_rate': 0,
+        'edge_mutation_rate': 0.00,
+        'weight_mutation_rate': 0
     }
 
-    evolve(network, env, mutation_args, episodes=30, mutations=500, graph=False, render=False)
+    evolve(network, env, mutation_args, episodes=30, mutations=100, graph=False, render=False, save=True)
 
 
 if __name__ == '__main__':

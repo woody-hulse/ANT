@@ -54,14 +54,12 @@ class RMSProp():
     def __call__(self, neuron, grads):
         dldw, dldb = grads
 
-        # Update moving average of the squared gradients
         neuron.m_weights = self.beta * neuron.m_weights + (1 - self.beta) * (dldw**2)
         neuron.m_bias = self.beta * neuron.m_bias + (1 - self.beta) * (dldb**2)
 
         weights_reg = neuron.weights * self.reg
         bias_reg = neuron.bias * self.reg
 
-        # Apply RMSProp update
         neuron.weights -= self.alpha * dldw / (np.sqrt(neuron.m_weights) + self.epsilon)
         neuron.bias -= self.alpha * dldb / (np.sqrt(neuron.m_bias) + self.epsilon)
 
