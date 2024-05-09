@@ -17,6 +17,7 @@ sys.path.append(os.path.abspath('../CARL/carl/envs/gymnasium/'))
 
 from classic_control.carl_cartpole import CARLCartPole
 from classic_control.carl_acrobot import CARLAcrobot
+from box2d.carl_lunarlander import CARLLunarLander
 
 class Environment():
     def __init__(self, env, continuous, mu_var=False, num_observations=None, num_actions=1, minimizer=None, old=False, name=''):
@@ -38,14 +39,14 @@ class Environment():
         self.minimizer = minimizer
 
         # defaults
-        self.neuron_activation = Linear()
+        self.neuron_activation = Linear() # nTanh(n=3)
         if continuous: self.output_activation = Sigmoid()
         else: self.output_activation = Linear()
         self.mu_activation = Tanh()
         self.var_activation = Sigmoid()
 
         # self.optimizer = ADAM(alpha=1e-6, beta1=0.9, beta2=0.9)
-        self.optimizer = RMSProp(alpha=1e-5, beta=0.99, reg=0)
+        self.optimizer = RMSProp(alpha=5e-7, beta=0.99, reg=0)
 
         self.parametrization = None
         self.gamma = 0.99
@@ -132,18 +133,45 @@ bipedalwalker = gym.make('BipedalWalker-v3', render_mode='rgb_array')
 ant = gym.make('Ant-v4', render_mode='rgb_array')
 watermelon = Watermelon()
 
-CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2, name='cartpole')
-CARL_CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2, name='carl_cartpole')
+CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2, name='Cartpole')
+CARL_CARTPOLE = Environment(cartpole, continuous=False, mu_var=False, num_actions=2, name='Cartpole [CARL]')
 PENDULUM = Environment(pendulum, continuous=True, mu_var=True, name='pendulum')
-LUNARLANDER = Environment(lunarlander, continuous=False, mu_var=False, num_actions=4, name='lunarlander')
-MOUNTAINCAR = Environment(mountaincar, continuous=False, mu_var=False, num_actions=3, name='mountaincar')
-ACROBOT = Environment(acrobot, continuous=False, mu_var=False, num_actions=3, name='acrobot')
-CARL_ACROBOT = Environment(carl_acrobot, continuous=False, mu_var=False, num_actions=3, num_observations=6, name='carl_acrobot')
-WATERMELON = Environment(watermelon, continuous=False, mu_var=False, num_actions=6, old=True, name='watermelon')
+LUNARLANDER = Environment(lunarlander, continuous=False, mu_var=False, num_actions=4, name='Lunar Lander')
+MOUNTAINCAR = Environment(mountaincar, continuous=False, mu_var=False, num_actions=3, name='Mountaincar')
+ACROBOT = Environment(acrobot, continuous=False, mu_var=False, num_actions=3, name='Acrobot')
+# CARL_ACROBOT = Environment(carl_acrobot, continuous=False, mu_var=False, num_actions=3, num_observations=6, name='Acrobot [CARL]')
+WATERMELON = Environment(watermelon, continuous=False, mu_var=False, num_actions=6, old=True, name='Watermelon')
 
 MOUNTAINCAR_CONTINUOUS = Environment(mountaincar_continuous, continuous=True, mu_var=True, name='mountaincar_continuous')
 BIPEDALWALKER = Environment(bipedalwalker, continuous=True, mu_var=True, name='bipedalwalker')
 ANTENV = Environment(ant, continuous=True, mu_var=True, name='ant')
+
+carl_lunarlander_earth = CARLLunarLander(contexts={0: {"GRAVITY_Y": -9.8}})
+carl_lunarlander_mars = CARLLunarLander(contexts={0: {"GRAVITY_Y": -3.7}})
+LUNARLANDER_EARTH = Environment(carl_lunarlander_earth, continuous=False, mu_var=False, num_actions=4, num_observations=8, name='Lunar Lander [Earth]')
+LUNARLANDER_MARS = Environment(carl_lunarlander_mars, continuous=False, mu_var=False, num_actions=4, num_observations=8, name='Lunar Lander [Mars]')
+
+class CarlEnvironment(Environment):
+    def __init__(self, env, context_range, continuous, num_observations=None, num_actions=1, name=''):
+        super().__init__(env, continuous, False, num_observations, num_actions, None, False, name)
+
+        self.context_range = context_range
+    
+    def reset(self):
+        contexts = {i: {key: np.random.uniform(*value)} for i, (key, value) in enumerate(self.context_range.items())}
+        self.env = self.env.__class__(contexts=contexts)
+        state = self.env.reset()[0]['obs']
+        return state
+
+carl_context_range = {
+    "LINK_LENGTH_1": [0.5, 1.5],
+    "LINK_LENGTH_2": [0.5, 1.5],
+    "LINK_MASS_1": [0.5, 1.5],
+    "LINK_MASS_2": [0.5, 1.5]
+}
+CARL_ACROBOT = CarlEnvironment(carl_acrobot, carl_context_range, continuous=False, num_actions=3, num_observations=6, name='Acrobot [CARL]')
+
+
 
 '''
 Make environment-specific changes here

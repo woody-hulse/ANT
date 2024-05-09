@@ -35,16 +35,71 @@ class Neuron(Diff):
         self.bias = None
         self.activation = Tanh()
         self.epsilon = 1e-5
-        # self.lrJ_1 = 1
 
         self.initialize_weights()
     
-    def initialize_weights(self):
-        # np.random.seed(42) # deterministic weight initialization
+    def initialize_weights(self, seed=None):
+        if not seed is None: np.random.seed(seed) # deterministic weight initialization
         self.input_size = len(self.prev)
         self.output_size = len(self.next)
-        self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.1
-        self.bias = np.random.normal(size=self.output_size) * 0.01
+        self.weights = np.random.normal(size=(self.input_size,)) * 0.1
+        self.bias = np.random.normal(size=1) * 0.01
+
+        self.accumulated_weight_gradients = [] # np.zeros_like(self.weights)
+        self.accumulated_bias_gradients = [] # np.zeros_like(self.bias)
+
+        self.inputs = np.zeros(self.input_size)
+        self.next_inputs = np.zeros(self.input_size)
+        self.outputs = np.zeros(self.output_size)
+
+        self.input_J = np.zeros(self.output_size)
+        self.next_input_J = np.zeros(self.output_size)
+
+        self.init_optimizer_params()
+    
+    def init_optimizer_params(self):
+        self.m_weights = np.zeros_like(self.weights)
+        self.m_bias = np.zeros_like(self.bias)
+        self.v_weights = np.zeros_like(self.weights)
+        self.v_bias = np.zeros_like(self.bias)
+    
+    def forward(self):
+        return self.activation(np.dot(self.inputs, self.weights) + self.bias)
+
+    def backward(self):
+        J = np.sum(self.input_J)
+        dady = self.activation.dydx(self.outputs)
+        dydx = self.weights.T
+        dydw = self.inputs
+        dydb = np.ones_like(self.bias)
+
+        dldw = J * dady * dydw
+        dldb = J * dady * dydb
+        dldx = J * dady * dydx
+
+        return dldw, dldb, dldx
+    
+
+
+class PNeuron(Neuron):
+    def __init__(self, id):
+        self.id = id
+        self.next = []
+        self.prev = []
+
+        self.weights = None
+        self.bias = None
+        self.activation = Tanh()
+        self.epsilon = 1e-5
+
+        self.initialize_weights()
+    
+    def initialize_weights(self, seed=None):
+        if not seed is None: np.random.seed(seed) # deterministic weight initialization
+        self.input_size = len(self.prev)
+        self.output_size = len(self.next)
+        self.weights = np.random.normal(size=(self.input_size, self.output_size)) * 0.12
+        self.bias = np.random.normal(size=self.output_size) * 0.005
 
         self.accumulated_weight_gradients = [] # np.zeros_like(self.weights)
         self.accumulated_bias_gradients = [] # np.zeros_like(self.bias)
@@ -68,21 +123,10 @@ class Neuron(Diff):
         return self.activation(self.inputs @ self.weights + self.bias)
 
     def backward(self):
-        # compute temporal term
-        # print(self.weights.shape, self.inputs.shape)
-        # dada = np.sum(self.weights.T * np.expand_dims(self.lrJ_1, axis=-1) / (self.epsilon + np.expand_dims(self.inputs, axis=0)), axis=1)
-        # print(dada, self.input_J)
-        # self.input_J = self.input_J * dada
-        # print(dada)
-
         dady = self.activation.dydx(self.outputs)
-        # print(dady, self.activation)
-        # print(self.id, self.activation)
         dydx = self.weights.T
         dydw = self.inputs
         dydb = np.ones_like(self.bias)
-
-        # self.lrJ_1 = 1 / (self.epsilon + 1e-6 * self.input_J * dady)
 
         dldw = np.outer(dydw, self.input_J * dady)
         dldb = self.input_J * dady * dydb

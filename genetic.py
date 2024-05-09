@@ -91,6 +91,7 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
     num_metrics = len(NETWORK_METRICS)
     metrics = {}
 
+    evolution_rewards = []
     best_networks = [copy.deepcopy(network) for _ in range(k)]
     best_test_reward = -np.inf
     with multiprocessing.Pool(processes=12) as pool:# multiprocessing.cpu_count()) as pool:
@@ -109,11 +110,14 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
                 # seeds = [seeds[0] for _ in range(mutations // k * k)]
                 total_rewards_networks = pool.starmap(simulate_episode, zip(networks, envs))#, seeds))
             else:
-                networks = [copy.deepcopy(network) for _ in range(mutations)]
-                envs = [copy.deepcopy(env) for _ in range(mutations)]
-                network_env_tuples = zip(networks, envs)
-                for tup in network_env_tuples:
-                    reward_network = simulate_episode(tup)
+                networks = []
+                for network in best_networks:
+                    networks += [copy.deepcopy(network) for _ in range(mutations // k)]
+                networks = [mutate(network, mutation_args) for network in networks]
+                envs = [copy.deepcopy(env) for _ in range(mutations // k * k)]
+                total_rewards_networks = []
+                for i in tqdm(range(len(networks))):
+                    reward_network = simulate_episode(networks[i], envs[i])
                     total_rewards_networks.append(reward_network)
 
             total_rewards = np.zeros(len(total_rewards_networks))
@@ -122,16 +126,19 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
                 total_rewards[i] = reward
             
             best_networks = np.array(networks)[np.argsort(total_rewards)[-k:]]
+            for network in best_networks:
+                evolution_rewards.append([None for _ in range(e * EPISODES - 1)] + list(np.array(network.metrics['rewards'][-EPISODES - 1:]) + np.random.normal(0, 0.1)))
             network = best_networks[-1]
             if network.use_metrics:
                 for metric in metrics.keys():
                     metrics[metric][0].append(network.metrics[metric][-1])
                     metrics[metric][1].append(np.mean(network.metrics[metric][-500:]))
-            test_reward = test_network(network, env, episodes=100, train=False)#, seed=seeds[0])
+            test_reward = test_network(network, env, episodes=10, train=False)#, seed=seeds[0])
             if test_reward > best_test_reward:
                 best_test_reward = test_reward
                 if save:
-                    network.save(f'saved_networks/genetic_{e}_{env.name}.pkl')
+                    name = env.name.replace(' ', '')
+                    network.save(f'saved_networks/{network.name}_genetic_{e}_{name}.pkl')
             debug_print([f'episode {e : 4} | total reward: {np.max(total_rewards) : 9.3f}; ' + \
                         f'average test reward: {test_reward : 9.3f}; neuron count: {network.num_neurons : 6}; ' + \
                         f'connection count: {network.num_edges : 6}; weight magnitude: {sum([np.sum(np.abs(neuron.weights)) for neuron in network.neurons]) : 9.3f}'])
@@ -166,7 +173,7 @@ def evolve(network, env, mutation_args, episodes=1000, mutations=1000, k=5, grap
         plt.show()
 
     
-    return network
+    return network, evolution_rewards
 
 def train(env, size, learning_rate, episodes):
     network = ANT(
@@ -191,26 +198,27 @@ def train(env, size, learning_rate, episodes):
 
 
 def main():
-    env = CARTPOLE        # *
+    # env = ACROBOT        # *
     # env = MOUNTAINCAR
     # env = LUNARLANDER     # *
     # env = WATERMELON
     # env = ACROBOT         # *
     # env = CARL_CARTPOLE   # *
     # env = CARL_ACROBOT
+    env = LUNARLANDER_EARTH
 
     base_ant = ANT(
-    num_neurons         = 32,
-    edge_probability    = 1.5,
+    num_neurons         = 20,
+    edge_probability    = 4,
     num_input_neurons   = env.observation_space,
     num_output_neurons  = env.action_space
     )
 
-    base_ann = ANN([env.observation_space, 14, 14, env.action_space])
+    base_ann = ANN([env.observation_space, 10, 10, env.action_space])
 
     network = base_ann
     # env.configure_newtork(network)
-    # network.load('saved_networks/genetic_10_lunarlander.pkl')
+    # network.load('saved_networks/ant_earth.pkl')
     # network.print_info()
     # plot_graph(network)
 
@@ -221,15 +229,16 @@ def main():
         'weight_mutation_rate': 1e-5
     }
     '''
+    network.load('saved_networks/ann_38_earth.pkl')
 
     mutation_args = {
 
-        'neuron_mutation_rate': 0,
-        'edge_mutation_rate': 0.00,
-        'weight_mutation_rate': 0
+        'neuron_mutation_rate': 0.5,
+        'edge_mutation_rate': 0.05,
+        'weight_mutation_rate': 1e-5
     }
 
-    evolve(network, env, mutation_args, episodes=30, mutations=100, graph=False, render=False, save=True)
+    evolve(network, env, mutation_args, episodes=40, mutations=36, graph=False, render=False, save=True)
 
 
 if __name__ == '__main__':

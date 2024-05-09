@@ -3,7 +3,7 @@ from network import *
 from core.activations import *
 from core.optimizers import *
 from core.losses import *
-from core.neuron import Neuron
+from core.neuron import Neuron, PNeuron
 
 '''
 Conventional Artificial Neural Network (ANN) custom implementation
@@ -19,12 +19,12 @@ class ANN(Network):
         self.initialize_network(layers)
         self.num_edges = np.sum(self.adjacency_matrix, dtype=np.int32)
         self.initialize_neuron_graph()
-        self.optimizer = RMSProp(alpha=1e-3, beta=0.99)
+        self.optimizer = RMSProp(alpha=5e-4, beta=0.99)
         self.use_metrics = False
     
     def initialize_network(self, layers):
         self.adjacency_matrix = np.zeros((self.num_neurons, self.num_neurons), dtype=np.int32)
-        self.neurons = [Neuron(i) for i in range(self.num_neurons)]
+        self.neurons = [PNeuron(i) for i in range(self.num_neurons)]
         self.input_neurons = self.neurons[:self.num_input_neurons]
         self.output_neurons = self.neurons[-self.num_output_neurons:]
         self.input_neuron_indices = [i for i in range(self.num_input_neurons)]
@@ -61,7 +61,7 @@ class ANN(Network):
         for i, num_new_neurons in enumerate(num_new_neurons_layers):
             layer_index = i + 1
             for n in range(self.num_neurons, self.num_neurons + num_new_neurons):
-                neuron = Neuron(n)
+                neuron = PNeuron(n)
                 self.neurons.append(neuron)
                 self.neuron_layers[layer_index].append(neuron)
 
@@ -138,20 +138,21 @@ class ANN(Network):
     def discrete_act(self, state, pool=None):
         logits = self.forward(state)
         probs = Softmax()(logits)
-        return np.random.choice(len(probs), p=probs), probs
+        return np.random.choice(len(probs
+                                    ), p=probs), probs
     
 
 def main():
-    network = ANN(layers=[4, 10, 10, 2])
-    # plot_graph(network)
+    network = ANN(layers=[6, 14, 14, 14, 2])
+    plot_graph(network, title='Example ANN architecture')
 
     mutation_args = {
         'neuron_mutation_rate': 1,
         'edge_mutation_rate': 0.01,
         'weight_mutation_rate': 0.001
     }
-
-    visualize_evolution(network, mutation_args=mutation_args, gif=True, time=100, spring=False)
+    
+    # visualize_evolution(network, mutation_args=mutation_args, gif=True, time=100, spring=False)
 
 
 if __name__ == '__main__':

@@ -41,6 +41,20 @@ class Tanh(Diff):
 
     def dydx(self, output):
         return 1 - np.square(self(output))
+    
+'''
+nTanh(x/n) activation function (y=x approximation)
+'''
+class nTanh(Diff):
+    def __init__(self, n=2):
+        super().__init__()
+        self.n = n
+
+    def __call__(self, x):
+        return self.n * np.tanh(x / self.n)
+
+    def dydx(self, output):
+        return (1 / np.cosh(output / self.n)) ** 2
 
 
 '''

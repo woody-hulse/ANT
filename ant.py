@@ -9,7 +9,7 @@ from utils import *
 from core.activations import *
 from core.optimizers import *
 from core.losses import *
-from core.neuron import Neuron
+from core.neuron import Neuron, PNeuron
 
 from network import Network
 
@@ -122,7 +122,7 @@ class ANT(Network):
         debug_print(['Initializing neuron graph'])
         neurons = []
         for i in range(self.num_neurons):
-            neuron = Neuron(i)
+            neuron = PNeuron(i)
             neurons.append(neuron)
 
         for i in range(self.adjacency_matrix.shape[0]):
@@ -166,7 +166,7 @@ class ANT(Network):
         num_new_neurons = np.random.poisson(neuron_mutation_rate)
 
         for n in range(self.num_neurons, self.num_neurons + num_new_neurons):
-            neuron = Neuron(n)
+            neuron = PNeuron(n)
             self.neurons.append(neuron)
 
         # Modify existing connections
@@ -314,7 +314,11 @@ class ANT(Network):
         if pool: logits = self.parallel_forward(state, pool) 
         else: logits = self.forward(state)
         probs = Softmax()(logits)
-        return np.argmax(probs), probs
+        argmax = np.argmax(probs)
+        # p = self.e * probs + np.eye(len(logits))[argmax] * (1 - self.e)
+        # self.e *= self.e_decay
+        # choice = np.random.choice(len(logits), p=p)
+        return argmax, probs
 
     '''
     Parallelized forward step
@@ -368,14 +372,14 @@ class ANT(Network):
 
 def main():
     network = ANT(
-    num_neurons         = 256,
-    edge_probability    = 1.8,
-    num_input_neurons   = 16,
-    num_output_neurons  = 8
+    num_neurons         = 64,
+    edge_probability    = 1,
+    num_input_neurons   = 6,
+    num_output_neurons  = 2
     )
     network.optimizer = RMSProp(alpha=1e-4)
     network.print_info()
-    # plot_graph(network)
+    plot_graph(network)
 
     # X, Y = ripple_sinusoidal_pulse(time=1000, n=10)
     # network.fit(X, Y, plot=False)
@@ -386,7 +390,7 @@ def main():
         'weight_mutation_rate': 0.001
     }
 
-    visualize_evolution(network, mutation_args=mutation_args, gif=True, time=100)
+    # visualize_evolution(network, mutation_args=mutation_args, gif=True, time=100)
 
     # network.fit(X, Y, plot=False)
 

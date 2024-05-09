@@ -27,7 +27,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
         metrics[metric] = ([], [])
 
     for episode in range(episodes):
-        state = env.env.reset()[0]
+        state = env.reset()
         total_reward = 0
         rewards = []
         gradients = []
@@ -53,20 +53,19 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             rewards.append(reward)
             total_reward += reward
 
-
             # grad = compute_discounted_gradients(gradients, rewards, gamma=0.99)#  / (t + 1)
             if pool: network.parallel_backward(grad, pool)
             else: network.backward(grad, clip=100, t=t, accumulate=True)
-            
-            e += np.argmax(probs) == action
+
+            e += action
 
             max_chars = 160
-            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={action : 2}; conf={probs[action] : 6.9f}; ' + \
+            pbar_string = f'Episode {episode : 05}: reward={total_reward : 9.3f}; action={action : 2}; conf={probs[action] : 6.9f}; e={e / (t + 1) : 6.4f}; ' + \
             network.get_metrics_string(metrics=['energy'])
             if len(pbar_string) > max_chars: pbar_string = pbar_string[:max_chars - 3] + '...'
             pbar.set_description(pbar_string)
 
-            if (done or t == time - 1) and render and (episode % 50 == 0):
+            if (done or t == time - 1) and render and (episode % 1 == 0):
                 image_frames[0].save(f'rl_results/episode{episode}.gif', 
                             save_all = True, 
                             duration = 20,
@@ -129,31 +128,37 @@ def convergence_train(env, size, learning_rate, episodes):
     
 
 def main():
-    env = CARTPOLE
+    # env = CARTPOLE
     # env = MOUNTAINCAR
     # env = LUNARLANDER
     # env = ACROBOT
     # env = CARL_CARTPOLE
     # env = WATERMELON
+    # env = LUNARLANDER_EARTH
+    env = CARL_ACROBOT
 
     base_ant = ANT(
-    num_neurons         = 32,
-    edge_probability    = 2,
+    num_neurons         = 20,
+    edge_probability    = 3,
     num_input_neurons   = env.observation_space,
     num_output_neurons  = env.action_space
     )
+    env.configure_newtork(base_ant)
     base_ann = ANN([env.observation_space, 14, 14, env.action_space])
 
-    network = base_ann
+    network = base_ant
     # env.configure_newtork(network)
     # network.print_info()
     # plot_graph(network)
-    # network.load('saved_networks/genetic_7_cartpole.pkl')
-    # network.optimizer = RMSProp(alpha=1e-5, beta=0.99)
-    # network.reset_weights()
+    # network.load('saved_networks/genetic_1_Acrobot.pkl')
+    # network.reset_weights(seed=420)
+    # network.optimizer = RMSProp(alpha=1e-6, beta=0.99)
+
+    # network.load('saved_networks/ant_earth.pkl')
+    # network.optimizer = RMSProp(alpha=1e-6, beta=0.99)
 
     # with multiprocessing.Pool(processes=12) as pool:
-    train(network, env, episodes=2000, time=200, render=False, plot=True, gif=False)
+    train(network, env, episodes=200, time=200, render=True, plot=True, gif=False)
 
 
 if __name__ == '__main__':

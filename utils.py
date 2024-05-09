@@ -7,6 +7,7 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 import os
+import csv
 import imageio
 import tracemalloc
 import seaborn
@@ -114,9 +115,39 @@ def weight_function(network, edge):
     weight = np.sum(np.abs(weights[out_index]))
     return weight
 
+def plot_graph_simple(adjacency_matrix, input_neurons=[], output_neurons=[]):
+    num_neurons = adjacency_matrix.shape[0]
+    G = nx.Graph(adjacency_matrix)
+    plt.figure(figsize=(6, 3))
+
+    neuron_sizes = [3 for _ in range(len(G.nodes))]
+    neuron_sizes = [20 if i in input_neurons + output_neurons else neuron_sizes[i] for i in range(len(G.nodes))]
+
+    input_neuron_color = '#883ab5'
+    output_neuron_color = '#3ab1b5'
+    hidden_neuron_color = (0.4, 0.4, 0.4)
+    neuron_colors = [hidden_neuron_color for _ in range(len(G.nodes))]
+    neuron_colors = [input_neuron_color if i in input_neurons else neuron_colors[i] for i in range(len(G.nodes))]
+    neuron_colors = [output_neuron_color if i in output_neurons else neuron_colors[i] for i in range(len(G.nodes))]
+
+    pos = nx.spring_layout(G, k=1/np.sqrt(num_neurons), iterations=20)
+    edge_color = '#b6b6b6'
+    width = 0.2
+    nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=edge_color, width=width, edgecolors='#444444')
+
+    legend_elements = [
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input (sensory) neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=output_neuron_color, markersize=8, label='Output (motor) neurons'),
+        matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=hidden_neuron_color, markersize=4, label='Hidden (inter) neurons')]
+    
+    plt.legend(handles=legend_elements, loc='upper right')
+    plt.show()
+
+
+
 def plot_graph(network, title='', spring=False, save=False, save_directory='graph_images/'):
     G = nx.Graph()
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(6, 3))
 
     for i, node in enumerate(network.neurons):
         G.add_node(i)
@@ -125,7 +156,6 @@ def plot_graph(network, title='', spring=False, save=False, save_directory='grap
     input_neuron_color = '#883ab5'
     output_neuron_color = '#3ab1b5'
     hidden_neuron_color = (0.4, 0.4, 0.4)
-    critic_neuron_color = (0.9, 0.2, 0.7)
     neuron_colors = [hidden_neuron_color for _ in range(len(G.nodes))]
     neuron_colors = [input_neuron_color if i in network.input_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
     neuron_colors = [output_neuron_color if i in network.output_neuron_indices else neuron_colors[i] for i in range(len(G.nodes))]
@@ -152,16 +182,15 @@ def plot_graph(network, title='', spring=False, save=False, save_directory='grap
         pos = nx.spring_layout(G, k=6/np.sqrt(network.num_neurons), pos=network.neuron_positions, iterations=2)
         network.neuron_positions = pos
     else: pos = network.neuron_positions
-    # edge_color = '#b6b6b6'
-    edge_color = weights
-    # width = 0.2
-    width = weights
+    edge_color = '#b6b6b6'
+    # edge_color = weights
+    width = 0.2
+    # width = weights
     nx.draw(G, pos=pos, with_labels=False, node_color=neuron_colors, node_size=neuron_sizes, edge_color=edge_color, width=width, edgecolors='#444444')
     
     legend_elements = [
         matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=input_neuron_color, markersize=8, label='Input neurons'),
         matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=output_neuron_color, markersize=8, label='Output neurons'),
-        # matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=critic_neuron_color, markersize=6, label='Critic Neurons'),
         matplotlib.lines.Line2D([0], [0], marker='o', color='w', markerfacecolor=hidden_neuron_color, markersize=4, label='Hidden neurons')]
 
     plt.legend(handles=legend_elements, loc='upper right')
@@ -239,8 +268,32 @@ def visualize_evolution(network, gif=False, mutation_args=None, time=10, spring=
     
     if gif: convert_files_to_gif('graph_evolution/', f'{network.name}_evolution.gif')
 
+
+def load_csv_to_adjacency_matrix(csv_file):
+    with open(csv_file, 'r') as file:
+        reader = csv.reader(file)
+        data = list(reader)
+
+    num_nodes = len(data)
+    adjacency_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
+
+    for row_idx, row in enumerate(data):
+        for col_idx, value in enumerate(row):
+            if row_idx == col_idx: continue
+            if not value == '': adjacency_matrix[row_idx, col_idx] = 1
+
+    return adjacency_matrix
+
+
 if __name__ == '__main__':
 
+    adjacency_matrix = load_csv_to_adjacency_matrix('../celegans_adjacency.csv')
+    input_neurons = [i for i in range(36)]
+    output_neurons = [i for i in range(81, 91)]
+    plot_graph_simple(adjacency_matrix, input_neurons=input_neurons, output_neurons=output_neurons)
+
+
+    '''
     # Sample data
     x = np.linspace(0, 10, 100)
     y = np.sin(x)
@@ -258,3 +311,4 @@ if __name__ == '__main__':
     plt.tight_layout()
 
     plt.savefig('line_plot.png')
+    '''

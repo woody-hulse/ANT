@@ -2,3 +2,4 @@ graph_images/*
 graph_results/*
 rl_results/*
 graph_evolution/*
+saved_networks/*

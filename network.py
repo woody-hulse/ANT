@@ -3,6 +3,7 @@ import pickle
 from utils import *
 from core.losses import *
 from core.optimizers import *
+from core.neuron import Neuron, PNeuron
 
 '''
 Superclass for ANN, ANT
@@ -16,6 +17,8 @@ class Network():
         self.num_output_neurons = num_output_neurons
         self.optimizer = RMSProp()
         self.epsilon = 1e-7
+        self.e = 1
+        self.e_decay = 0.999
         self.neurons = []
 
         self.metrics = {
@@ -65,6 +68,7 @@ class Network():
     '''
     def print_info(self):
         debug_print([
+            f'\n---- {self.name} ----',
             '\nNumber of neurons     :', self.num_neurons,
             '\nNumber of connections :', self.num_edges,
             '\nInput indices         :', self.input_neuron_indices,
@@ -113,9 +117,12 @@ class Network():
             discounted_rewards[t] = total
 
         for neuron in self.neurons:
-            discounted_weight_gradients = np.sum(np.array(neuron.accumulated_weight_gradients) * discounted_rewards[:, np.newaxis, np.newaxis], axis=0)
-            discounted_bias_gradients = np.sum(np.array(neuron.accumulated_bias_gradients) * discounted_rewards[:, np.newaxis], axis=0)
-            #  print(discounted_bias_gradients.shape, np.array(neuron.accumulated_bias_gradients).shape, discounted_rewards.shape, neuron.bias.shape)
+            if type(neuron) is Neuron:
+                discounted_weight_gradients = np.sum(np.array(neuron.accumulated_weight_gradients) * discounted_rewards[:, np.newaxis], axis=0)
+                discounted_bias_gradients = np.sum(np.array(neuron.accumulated_bias_gradients)[:, 0] * discounted_rewards, axis=0)
+            else:
+                discounted_weight_gradients = np.sum(np.array(neuron.accumulated_weight_gradients) * discounted_rewards[:, np.newaxis, np.newaxis], axis=0)
+                discounted_bias_gradients = np.sum(np.array(neuron.accumulated_bias_gradients) * discounted_rewards[:, np.newaxis], axis=0)
 
             if type(self.optimizer) == ADAM: self.optimizer(neuron, [discounted_weight_gradients, discounted_bias_gradients], t + 1)
             else: self.optimizer(neuron, [discounted_weight_gradients, discounted_bias_gradients])
@@ -141,9 +148,9 @@ class Network():
             self.__dict__.update(data['network'].__dict__)
 
 
-    def reset_weights(self):
+    def reset_weights(self, seed=None):
         for neuron in self.neurons:
-            neuron.initialize_weights()
+            neuron.initialize_weights(seed)
 
 
     '''
