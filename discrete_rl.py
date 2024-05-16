@@ -9,13 +9,6 @@ from environments import *
 import seaborn as sns
 sns.set_style(style='whitegrid')
 
-def compute_discounted_gradients(gradients, rewards, gamma=0.99):
-    discounted_gradients = np.zeros_like(gradients[0])
-    T = len(rewards) - 1
-    for t in range(len(gradients)):
-        discounted_gradients += gradients[t] * rewards[t] * np.power(gamma, T - t)
-    return discounted_gradients
-
 def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=False, pool=None):
     episode_rewards = []
 
@@ -52,8 +45,7 @@ def train(network, env, episodes=1000, time=500, render=False, plot=True, gif=Fa
             gradients.append(grad)
             rewards.append(reward)
             total_reward += reward
-
-            # grad = compute_discounted_gradients(gradients, rewards, gamma=0.99)#  / (t + 1)
+            
             if pool: network.parallel_backward(grad, pool)
             else: network.backward(grad, clip=100, t=t, accumulate=True)
 

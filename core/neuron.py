@@ -190,7 +190,6 @@ class PNeuron(Neuron):
 
 '''
 Neuron updating function (for parallelization)
-    - Investigate moving this into the neuron class
 '''
 def update_neuron(neuron, optimizer, update_metrics=False):
     dady = neuron.activation.dydx(neuron.outputs)
